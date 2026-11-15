@@ -129,7 +129,7 @@ def _os_keyring() -> CredentialBackend:
     if sys.platform == "linux":
         from keyring.backends.SecretService import Keyring as SecretService
 
-        return SecretService()
+        return cast(CredentialBackend, SecretService())
     if sys.platform == "win32":
         from keyring.backends import Windows
         from keyring.backends.Windows import WinVaultKeyring

@@ -74,7 +74,14 @@ def main() -> None:
             "src/claudex/__main__.py",
             env=env,
         )
-        shutil.copyfile(ROOT / "LICENSE", build / "claudex" / "LICENSE")
+        license_path = ROOT / "LICENSE"
+        shutil.copyfile(license_path, build / "claudex" / "LICENSE")
+        metadata = list((build / "claudex" / "_internal").glob("claudex-*.dist-info"))
+        if len(metadata) != 1 or not metadata[0].is_dir():
+            raise SystemExit("The bundle is missing Claudex distribution metadata.")
+        metadata_licenses = metadata[0] / "licenses"
+        metadata_licenses.mkdir(exist_ok=True)
+        shutil.copyfile(license_path, metadata_licenses / "LICENSE")
         shutil.copyfile(ROOT / "man" / "claudex.1", build / "claudex" / "claudex.1")
         archive_format = "zip" if system == "windows" else "gztar"
         archive = Path(
@@ -93,6 +100,14 @@ def main() -> None:
         executable = extracted / "claudex" / ("claudex.exe" if system == "windows" else "claudex")
         _run(os.fspath(executable), "--version")
         _run(os.fspath(executable), "models", "--example")
+        license_text = license_path.read_text(encoding="utf-8")
+        if (extracted / "claudex" / "LICENSE").read_text(encoding="utf-8") != license_text:
+            raise SystemExit("The bundled license does not match the project license.")
+        result = subprocess.run(  # noqa: S603
+            [os.fspath(executable), "license"], capture_output=True, text=True, check=True
+        )
+        if result.stdout != license_text:
+            raise SystemExit("The bundled license command did not print the project license.")
 
 
 if __name__ == "__main__":

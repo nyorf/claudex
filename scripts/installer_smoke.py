@@ -83,6 +83,9 @@ def _smoke(archive: Path, workspace: Path, version: str, windows_path: str | Non
     installer = [*command, str(ROOT / "scripts" / script), *options]
     install_archive = [*installer, local_arg, str(archive)]
     _run(install_archive, environment, choice="1\n")
+    license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    assert (install / "LICENSE").read_text(encoding="utf-8") == license_text
+    assert _run([str(executable), "license"], environment) == license_text
     if os.name != "nt":
         manual = workspace / ".local" / "share" / "man" / "man1" / "claudex.1"
         assert manual.is_symlink() and manual.resolve() == (install / "claudex.1").resolve()
@@ -92,6 +95,7 @@ def _smoke(archive: Path, workspace: Path, version: str, windows_path: str | Non
     assert "claudex-opus" in _run([str(executable), "models", "--example"], environment)
     _run(install_archive, environment, choice="2\n")
     assert _run([str(executable), "--version"], environment).strip() == expected_version
+    assert _run([str(executable), "license"], environment) == license_text
     update_option = "-Update" if os.name == "nt" else "--update"
     _run([*install_archive, update_option], environment)
     assert _run([str(executable), "--version"], environment).strip() == expected_version

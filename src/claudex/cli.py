@@ -5,7 +5,7 @@ import re
 import sys
 from hashlib import sha256
 from hmac import compare_digest
-from importlib.metadata import version
+from importlib.metadata import distribution, version
 from pathlib import Path
 
 import httpx2
@@ -86,6 +86,7 @@ def _parser() -> argparse.ArgumentParser:
         "--version", action="version", version=f"%(prog)s {version('claudex')} ({_REPOSITORY})"
     )
     commands = parser.add_subparsers(dest="command")
+    commands.add_parser("license", help="Show the Claudex license")
     login = commands.add_parser("login", help="Continue with ChatGPT in your browser")
     login.add_argument("profile")
     for name, help_text in (
@@ -623,6 +624,21 @@ def _saved_desktop_credential(state_dir: Path, port: int, fingerprint: str) -> s
     return token
 
 
+def _show_license() -> int:
+    license_text = distribution("claudex").read_text("licenses/LICENSE")
+    if license_text is None:
+        source_root = Path(__file__).resolve().parent.parent
+        if source_root.name == "src" and not getattr(sys, "frozen", False):
+            try:
+                license_text = (source_root.parent / "LICENSE").read_text(encoding="utf-8")
+            except OSError as exc:
+                raise LaunchError("Could not read the Claudex license file.") from exc
+    if license_text is None:
+        raise LaunchError("The Claudex license file is missing. Reinstall Claudex.")
+    sys.stdout.write(license_text)
+    return 0
+
+
 def _execute(args: argparse.Namespace, settings: Settings) -> int:
     if args.command == "cli" and args.claude_args in (
         ["--help"],
@@ -666,6 +682,8 @@ def main() -> int:
     args = _parse_args(sys.argv[1:])
     configure_logging()
     try:
+        if args.command == "license":
+            return _show_license()
         return _execute(args, Settings())
     except (
         AccountError,

@@ -51,6 +51,7 @@ jobs:
           uv venv wheel-check
           uv pip install --python wheel-check/bin/python dist/*.whl
           wheel-check/bin/claudex --version
+          wheel-check/bin/claudex license | cmp - LICENSE
           wheel-check/bin/claudex models --example
           cd dist
           for artifact in *.whl *.tar.gz; do sha256sum "$artifact" > "$artifact.sha256"; done

@@ -144,3 +144,7 @@ If a check returns no usable verdict, switch to Manual with Shift+Tab to review 
 yourself. See [how Claude Code handles classifier requests](https://code.claude.com/docs/en/auto-mode-classifier-billing).
 
 The [release checks](docs/operations/releasing.md) cover the CLI and Claude Desktop Code tab.
+
+## License
+
+Claudex is licensed under [Apache 2.0](LICENSE). Run `claudex license` to print the full text.
