@@ -1,0 +1,165 @@
+name: Build release artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    uses: ./.github/workflows/test.yml
+
+  version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.14"
+      - name: Check release tag
+        id: read
+        shell: bash
+        run: |
+          version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "The tag must match the project version." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  wheel:
+    needs: [check, version]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.14"
+      - run: pip install uv==0.13.5
+      - run: make wheel
+      - name: Smoke-test the installed wheel
+        shell: bash
+        run: |
+          uv venv wheel-check
+          uv pip install --python wheel-check/bin/python dist/*.whl
+          wheel-check/bin/claudex --version
+          wheel-check/bin/claudex models --example
+          cd dist
+          for artifact in *.whl *.tar.gz; do sha256sum "$artifact" > "$artifact.sha256"; done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: python-distributions
+          path: dist/*
+          if-no-files-found: error
+
+  bundle:
+    needs: [check, version]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: darwin-arm64
+            extension: tar.gz
+          - runner: macos-15-intel
+            target: darwin-x86_64
+            extension: tar.gz
+          - runner: ubuntu-24.04
+            target: linux-x86_64
+            extension: tar.gz
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+            extension: tar.gz
+          - runner: windows-2025
+            target: windows-x86_64
+            extension: zip
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      BUNDLE: dist/claudex-${{ needs.version.outputs.version }}-${{ matrix.target }}.${{ matrix.extension }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.14"
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: command -v objdump || sudo apt-get install -y binutils
+      - run: python -m pip install uv==0.13.5
+      - name: Check Windows runtime
+        if: runner.os == 'Windows'
+        run: uv run --locked pytest tests/test_accounts.py tests/test_windows_runtime.py
+      - run: uv run --locked --group bundle python scripts/bundle.py
+      - name: Verify installer lifecycle
+        run: uv run --locked python scripts/installer_smoke.py "$env:BUNDLE" --verify-windows-path
+        if: runner.os == 'Windows'
+      - name: Verify installer lifecycle
+        run: uv run --locked python scripts/installer_smoke.py "$BUNDLE"
+        if: runner.os != 'Windows'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bundle-${{ matrix.target }}
+          path: |
+            ${{ env.BUNDLE }}
+            ${{ env.BUNDLE }}.sha256
+          if-no-files-found: error
+
+  draft-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [check, version, wheel, bundle]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Verify assets and prepare installers
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          assets = Path("release-assets")
+          version = os.environ["RELEASE_VERSION"]
+          targets = (
+              ("darwin-arm64", "tar.gz"), ("darwin-x86_64", "tar.gz"),
+              ("linux-arm64", "tar.gz"), ("linux-x86_64", "tar.gz"),
+              ("windows-x86_64", "zip"),
+          )
+          names = [
+              *(f"claudex-{version}-{target}.{extension}" for target, extension in targets),
+              f"claudex-{version}-py3-none-any.whl",
+              f"claudex-{version}.tar.gz",
+          ]
+          for name in names:
+              file = assets / name
+              line = (assets / f"{name}.sha256").read_text(encoding="ascii").split()
+              digest = hashlib.sha256(file.read_bytes()).hexdigest()
+              if line != [digest, name]:
+                  raise SystemExit(f"Invalid checksum for {name}.")
+          PY
+          cp scripts/install.sh scripts/install.ps1 release-assets/
+          python Formula/generate.py release-assets "$RELEASE_VERSION" "$(git rev-parse HEAD)" generated-tap/Formula
+          ruby -c generated-tap/Formula/claudex.rb
+          ruby -c generated-tap/Formula/claudex-bin.rb
+          tar -czf release-assets/claudex-homebrew-formulae.tar.gz -C generated-tap Formula
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "$GITHUB_REF_NAME" --generate-notes release-assets/*

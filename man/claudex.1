@@ -1,0 +1,97 @@
+.Dd November 16, 2026
+.Dt CLAUDEX 1
+.Os
+.Sh NAME
+.Nm claudex
+.Nd use ChatGPT models with Claude Code
+.Sh SYNOPSIS
+.Nm
+.Op Ar command
+.Op Ar options
+.Sh DESCRIPTION
+.Nm
+connects Claude Code to models available through a configured ChatGPT profile.
+The proxy listens on the local computer.
+.Pp
+Run
+.Nm
+without a command to show the proxy status and default profile.
+.Sh COMMANDS
+.Bl -tag -width Ds
+.It Cm cli Op Ar claude-arguments
+Start the proxy if needed and launch Claude Code, passing arguments through to
+Claude Code.
+.Cm run
+is an alias.
+Claudex options use the prefixes
+.Fl -proxy-profile ,
+.Fl -proxy-model ,
+.Fl -proxy-effort ,
+.Fl -proxy-map ,
+.Fl -proxy-port ,
+and
+.Fl -proxy-saved .
+Use
+.Fl -proxy-help
+for their usage.
+.It Cm desktop Op Ar options
+Start the proxy if needed and open Claude Desktop.
+.It Cm serve Op Fl -foreground Op Ar options
+Start the proxy in the background.
+With
+.Fl -foreground ,
+run the proxy in the current terminal.
+.It Cm stop Op Fl -port Ar port
+Stop the running proxy on the selected port.
+.It Cm status Op Fl -port Ar port
+Show the proxy status and default profile.
+.It Cm login Ar profile
+Sign in to a named ChatGPT profile in a browser.
+.It Cm use Ar profile
+Select the default profile for new launches.
+.It Cm profiles
+List saved profiles.
+.It Cm logout Ar profile
+Sign out of a profile.
+.It Cm remove Ar profile
+Remove a saved profile.
+.It Cm models Op Fl -profile Ar profile Op Fl -map Ar path
+Show model routes and context windows.
+.Fl -available
+queries the account catalog and
+.Fl -example
+prints the bundled model map.
+.It Cm configure Op Cm desktop Op Fl -port Ar port
+Configure plain Claude Code or Claude Desktop for the proxy.
+.It Cm unconfigure
+Restore Claude Code settings from before configuration.
+.It Cm update
+Update a bundle installed by the Claudex installer.
+.El
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl -profile Ar name
+Select a saved ChatGPT profile.
+.It Fl -model Ar alias
+Select a model route from the YAML map.
+.It Fl -effort Ar level
+Set reasoning effort to low, medium, high, xhigh, or max.
+.It Fl -map Ar path
+Use a YAML model map at the given path.
+.It Fl -port Ar port
+Select the loopback port.
+The default is 8765.
+.It Fl -saved
+Use saved proxy launch options.
+.It Fl -version
+Show the version and repository URL.
+.It Fl -help
+Show command help.
+.El
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa ~/.local/share/man/man1/claudex.1
+Manual page installed by the Unix release installer.
+.El
+.Sh SEE ALSO
+.Lk https://github.com/nyorf/claudex

@@ -1,0 +1,66 @@
+default: claudex-opus
+routes:
+  claudex-opus:
+    label: GPT-6.1 Sol
+    aliases: [gpt-6.1-sol, default, opus, claude-opus-5-5, claudex-gpt-sol]
+    model: gpt-6.1-sol
+    context_window: 500000
+    claude_default_effort: medium
+    default_effort: medium
+    efforts: {low: low, medium: medium, high: high, xhigh: xhigh, max: max}
+  claudex-fable:
+    label: GPT-6 Astra
+    aliases: [gpt-6-astra, fable, claude-fable-5-2]
+    model: gpt-6-astra
+    context_window: 272000
+    claude_default_effort: medium
+    default_effort: medium
+    efforts: {low: low, medium: medium, high: high, xhigh: xhigh, max: max}
+  claudex-sonnet:
+    label: GPT-6.1 Terra
+    aliases: [gpt-6.1-terra, sonnet, claude-sonnet-5-5]
+    model: gpt-6.1-terra
+    context_window: 500000
+    claude_default_effort: medium
+    default_effort: medium
+    efforts: {low: low, medium: medium, high: high, xhigh: xhigh, max: max}
+  claudex-sonnet-5:
+    label: GPT-6 Sol
+    aliases: [gpt-6-sol, claude-sonnet-5]
+    model: gpt-6-sol
+    context_window: 272000
+    claude_default_effort: medium
+    default_effort: medium
+    efforts: {low: low, medium: medium, high: high, xhigh: xhigh, max: max}
+  claudex-haiku:
+    label: GPT-6 Luna
+    aliases: [gpt-6-luna, haiku, claude-haiku-5-5]
+    model: gpt-6-luna
+    context_window: 272000
+    claude_default_effort: medium
+    default_effort: medium
+    efforts: {low: low, medium: medium, high: high, xhigh: xhigh, max: max}
+  claudex-opus-5:
+    label: GPT-5.6 Sol
+    aliases: [gpt-5.6-sol, claude-opus-5]
+    model: gpt-5.6-sol
+    context_window: 272000
+    claude_default_effort: medium
+    default_effort: medium
+    efforts: {low: low, medium: medium, high: high, xhigh: xhigh, max: max}
+  claudex-sonnet-4-6:
+    label: GPT-5.6 Terra
+    aliases: [gpt-5.6-terra, claude-sonnet-4-6]
+    model: gpt-5.6-terra
+    context_window: 272000
+    claude_default_effort: medium
+    default_effort: medium
+    efforts: {low: low, medium: medium, high: high, xhigh: xhigh, max: max}
+  claudex-haiku-4-5:
+    label: GPT-5.6 Luna
+    aliases: [gpt-5.6-luna, claude-haiku-4-5, claude-haiku-4-5-20251001]
+    model: gpt-5.6-luna
+    context_window: 272000
+    claude_default_effort: medium
+    default_effort: medium
+    efforts: {low: low, medium: medium, high: high, xhigh: xhigh, max: max}
