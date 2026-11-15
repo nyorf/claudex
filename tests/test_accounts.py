@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import sys
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -217,7 +218,8 @@ async def test_switching_profiles_preserves_the_launch_binding(
     assert initial["agent_name_hint"] == ["Claudex"]
     state = (tmp_path / "profiles.json").read_text()
     assert "synthetic" not in state
-    assert (tmp_path / "profiles.json").stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":
+        assert (tmp_path / "profiles.json").stat().st_mode & 0o777 == 0o600
 
 
 async def test_concurrent_launches_only_rotate_the_rejected_token_once(

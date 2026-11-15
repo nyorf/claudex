@@ -134,9 +134,11 @@ def test_native_windows_settings_persist_and_restore(tmp_path: Path) -> None:
     assert configure_claude(config, settings)
     assert json.loads((config / "settings.json").read_text())["env"] == settings["env"]
     powershell = (
-        "$a = Get-Acl -LiteralPath $env:CLAUDEX_TEST_SETTINGS; "
-        "$ids = @($a.Access | ForEach-Object { "
-        "$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }); "
+        "$ErrorActionPreference = 'Stop'; "
+        "$a = [System.IO.File]::GetAccessControl($env:CLAUDEX_TEST_SETTINGS); "
+        "$ids = @($a.GetAccessRules($true, $true, "
+        "[System.Security.Principal.SecurityIdentifier]) | "
+        "ForEach-Object { $_.IdentityReference.Value }); "
         "@{ protected = $a.AreAccessRulesProtected; ids = $ids; "
         "current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } "
         "| ConvertTo-Json -Compress"
@@ -145,9 +147,10 @@ def test_native_windows_settings_persist_and_restore(tmp_path: Path) -> None:
         ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", powershell],  # noqa: S607
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         env={**os.environ, "CLAUDEX_TEST_SETTINGS": str(config / "settings.json")},
     )
+    assert result.returncode == 0, result.stderr
     acl = json.loads(result.stdout)
     assert acl["protected"]
     assert set(acl["ids"]) == {"S-1-5-18", "S-1-5-32-544", acl["current"]}
