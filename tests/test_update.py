@@ -50,11 +50,13 @@ def test_windows_helper_captures_parent_before_returning(
     powershell.parent.mkdir(parents=True)
     powershell.touch()
     monkeypatch.setenv("SYSTEMROOT", str(system))
+    monkeypatch.setenv("PsModulePath", "synthetic-incompatible-path")
+    monkeypatch.setenv("CLAUDEX_TEST_ENV", "preserved")
     monkeypatch.setattr(update.tempfile, "mkdtemp", lambda **kwargs: str(tmp_path))
     calls = []
 
-    def start(command: list[str]) -> SimpleNamespace:
-        calls.append(command)
+    def start(command: list[str], *, env: dict[str, str]) -> SimpleNamespace:
+        calls.append((command, env))
         Path(command[command.index("-Ready") + 1]).touch()
         return SimpleNamespace(poll=lambda: None)
 
@@ -62,7 +64,11 @@ def test_windows_helper_captures_parent_before_returning(
     installer_copy = tmp_path / "source.ps1"
     installer.rename(installer_copy)
     update._start_windows_update(installer_copy)
-    assert calls[0][0] == str(powershell)
-    assert calls[0][-2:] == ["-PowerShell", str(powershell)]
+    command, env = calls[0]
+    assert command[0] == str(powershell)
+    assert command[-2:] == ["-PowerShell", str(powershell)]
+    assert all(key.upper() != "PSMODULEPATH" for key in env)
+    assert env["CLAUDEX_TEST_ENV"] == "preserved"
+    assert update.os.environ["PsModulePath"] == "synthetic-incompatible-path"
     assert (tmp_path / "install.ps1").read_text(encoding="ascii") == "fixture"
     assert "$parent.WaitForExit()" in (tmp_path / "update.ps1").read_text(encoding="utf-8")

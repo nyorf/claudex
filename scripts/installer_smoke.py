@@ -64,6 +64,9 @@ def _smoke(archive: Path, workspace: Path, version: str, windows_path: str | Non
         shell = shutil.which("powershell.exe")
         if shell is None:
             raise SystemExit("Windows PowerShell is required for the installer smoke test.")
+        environment = {
+            key: value for key, value in environment.items() if key.upper() != "PSMODULEPATH"
+        }
         environment["LOCALAPPDATA"] = str(workspace)
         install = workspace / "Programs" / "Claudex" / "current"
         executable = install / "claudex.exe"

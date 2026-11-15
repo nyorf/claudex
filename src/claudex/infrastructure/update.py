@@ -107,6 +107,7 @@ def _start_windows_update(installer: Path) -> None:
                 "-PowerShell",
                 str(powershell),
             ],
+            env={key: value for key, value in os.environ.items() if key.upper() != "PSMODULEPATH"},
         )
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
