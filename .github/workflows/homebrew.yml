@@ -1,0 +1,59 @@
+name: Update Homebrew formula
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    if: >-
+      github.repository == 'nyorf/claudex' &&
+      ((github.event_name == 'release' && !github.event.release.prerelease) ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: homebrew-formula
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Download the latest release formula
+        shell: bash
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" > "$RUNNER_TEMP/release.json"
+          tag="$(jq -er '.tag_name' "$RUNNER_TEMP/release.json")"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          revision="$(git rev-parse "refs/tags/$tag^{commit}")"
+          git merge-base --is-ancestor "$revision" HEAD
+          git show "$revision:Formula/claudex.rb" > "$RUNNER_TEMP/tagged-formula.rb"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern claudex-homebrew-formula.tar.gz --dir "$RUNNER_TEMP"
+          python3 Formula/sync.py "$RUNNER_TEMP/release.json" \
+            "$RUNNER_TEMP/claudex-homebrew-formula.tar.gz" "$revision" \
+            "$RUNNER_TEMP/tagged-formula.rb" Formula/claudex.rb
+          ruby -c Formula/claudex.rb
+      - name: Commit the formula
+        shell: bash
+        run: |
+          if git diff --quiet -- Formula/claudex.rb; then
+            exit 0
+          fi
+          expected="$(jq -er '.tag_name' "$RUNNER_TEMP/release.json")"
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)"
+          test "$latest" = "$expected"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- Formula/claudex.rb
+          git commit -m "chore: publish homebrew bottles for $expected"
+          git push origin HEAD:refs/heads/master

@@ -436,3 +436,120 @@ def test_desktop_refuses_running_app_and_scrubs_launch_errors(
     with pytest.raises(GatewaySettingsError, match="Could not open Claude Desktop") as failure:
         desktop.launch_desktop(tmp_path, state_dir, 8765, settings)
     assert _BEARER not in str(failure.value)
+
+
+def test_explicit_models_preserve_labels_and_only_offer_supported_efforts(tmp_path: Path) -> None:
+    settings = _gateway_settings()
+    settings["availableModels"] = ["claudex-opus", "claudex-sonnet", "claudex-custom"]
+    settings["modelPicker"] = {
+        "options": [
+            {"model": "claudex-custom", "label": "Custom"},
+            {"model": "claudex-opus", "label": "Opus"},
+            {"model": "claudex-sonnet", "label": "Sonnet"},
+        ]
+    }
+    levels = {
+        "claudex-opus": ("low", "medium", "high", "xhigh", "max"),
+        "claudex-sonnet": ("low", "medium", "high"),
+        "claudex-custom": ("low", "high"),
+    }
+    output = desktop.configure_desktop(
+        tmp_path, tmp_path / "state", 8765, settings, _COMMAND, export=True, effort_levels=levels
+    )
+    assert isinstance(output, Path)
+    profile = _json(output)
+    assert profile["modelDiscoveryEnabled"] is False
+    assert profile["inferenceModels"] == [
+        {"name": "claudex-opus", "labelOverride": "Opus", "behavesAs": "claude-sonnet-5"},
+        {
+            "name": "claudex-sonnet",
+            "labelOverride": "Sonnet",
+            "behavesAs": "claude-sonnet-5",
+            "maxEffort": "high",
+        },
+        {"name": "claudex-custom", "labelOverride": "Custom"},
+    ]
+
+
+def test_launch_migrates_discovery_and_detects_changed_routes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _gateway_settings()
+    settings["modelPicker"] = {"options": [{"model": "claudex-opus", "label": "Opus"}]}
+    state = tmp_path / "state with spaces"
+    levels = {"claudex-opus": ("low", "medium", "high", "xhigh", "max")}
+    assert desktop.configure_desktop(tmp_path, state, 8765, settings, _INSTALLED_COMMAND)
+    monkeypatch.setattr(desktop, "_open_desktop", lambda _: None)
+    with pytest.raises(desktop.DesktopProfileSetupError):
+        desktop.launch_desktop(tmp_path, state, 8765, settings, effort_levels=levels)
+    assert desktop.configure_desktop(
+        tmp_path, state, 8765, settings, _INSTALLED_COMMAND, effort_levels=levels
+    )
+    root = _support(tmp_path) / "Claude-3p"
+    receipt = root / desktop._MODEL_RECEIPT
+    assert stat.S_IMODE(receipt.stat().st_mode) == 0o600
+    assert not desktop.configure_desktop(
+        tmp_path, state, 8765, settings, _INSTALLED_COMMAND, effort_levels=levels
+    )
+    desktop.launch_desktop(tmp_path, state, 8765, settings, effort_levels=levels)
+    levels = {"claudex-opus": ("low", "medium", "high")}
+    with pytest.raises(desktop.DesktopProfileSetupError):
+        desktop.launch_desktop(tmp_path, state, 8765, settings, effort_levels=levels)
+    assert desktop.configure_desktop(
+        tmp_path, state, 8765, settings, _INSTALLED_COMMAND, effort_levels=levels
+    )
+    desktop.launch_desktop(tmp_path, state, 8765, settings, effort_levels=levels)
+
+
+def test_generated_model_edits_are_not_overwritten(tmp_path: Path) -> None:
+    settings = _gateway_settings()
+    settings["modelPicker"] = {"options": [{"model": "claudex-opus", "label": "Opus"}]}
+    state = tmp_path / "state"
+    levels = {"claudex-opus": ("low", "medium", "high")}
+    assert desktop.configure_desktop(
+        tmp_path, state, 8765, settings, _COMMAND, effort_levels=levels
+    )
+    path = _support(tmp_path) / "Claude-3p" / "configLibrary" / f"{desktop._PROFILE_ID}.json"
+    profile = _json(path)
+    profile["inferenceModels"][0]["labelOverride"] = "Edited"
+    path.write_text(json.dumps(profile))
+    with pytest.raises(GatewaySettingsError, match="conflicting custom settings"):
+        desktop.configure_desktop(tmp_path, state, 8765, settings, _COMMAND, effort_levels=levels)
+    with pytest.raises(GatewaySettingsError, match="conflicting custom settings"):
+        desktop.launch_desktop(tmp_path, state, 8765, settings, effort_levels=levels)
+    assert _json(path) == profile
+
+
+@pytest.mark.parametrize("fail_after_profile", [False, True])
+def test_model_receipt_recovers_interrupted_profile_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fail_after_profile: bool
+) -> None:
+    settings = _gateway_settings()
+    settings["modelPicker"] = {"options": [{"model": "claudex-opus", "label": "Opus"}]}
+    state = tmp_path / "state"
+    initial = {"claudex-opus": ("low", "medium", "high")}
+    updated = {"claudex-opus": ("low", "medium", "high", "xhigh", "max")}
+    assert desktop.configure_desktop(
+        tmp_path, state, 8765, settings, _COMMAND, effort_levels=initial
+    )
+    root = _support(tmp_path) / "Claude-3p"
+    profile_path = root / "configLibrary" / f"{desktop._PROFILE_ID}.json"
+    write_json = desktop._write_private_json
+
+    def interrupted(path: Path, data: desktop.Settings) -> bool:
+        if path == profile_path:
+            if fail_after_profile:
+                write_json(path, data)
+            raise OSError("interrupted")
+        return write_json(path, data)
+
+    with monkeypatch.context() as context:
+        context.setattr(desktop, "_write_private_json", interrupted)
+        with pytest.raises(GatewaySettingsError, match="could not access"):
+            desktop.configure_desktop(
+                tmp_path, state, 8765, settings, _COMMAND, effort_levels=updated
+            )
+    assert len(_json(root / desktop._MODEL_RECEIPT)["digests"]) == 2
+    desktop.configure_desktop(tmp_path, state, 8765, settings, _COMMAND, effort_levels=updated)
+    assert len(_json(root / desktop._MODEL_RECEIPT)["digests"]) == 1
+    assert "maxEffort" not in _json(profile_path)["inferenceModels"][0]

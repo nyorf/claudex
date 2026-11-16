@@ -512,12 +512,20 @@ def _desktop_paths(state_dir: Path) -> tuple[Path, Path]:
 def _open_desktop(args: argparse.Namespace, settings: Settings) -> int:
     home, state_dir = _desktop_paths(settings.state_dir)
     port = args.port
-    published = _acquire_proxy(args, settings).settings
+    snapshot = _acquire_proxy(args, settings)
+    published = snapshot.settings
     try:
-        launch_desktop(home, state_dir, port, published)
+        launch_desktop(home, state_dir, port, published, effort_levels=snapshot.effort_levels)
     except DesktopProfileSetupError:
-        configure_desktop(home, state_dir, port, published, _desktop_helper_command())
-        launch_desktop(home, state_dir, port, published)
+        configure_desktop(
+            home,
+            state_dir,
+            port,
+            published,
+            _desktop_helper_command(),
+            effort_levels=snapshot.effort_levels,
+        )
+        launch_desktop(home, state_dir, port, published, effort_levels=snapshot.effort_levels)
     print("Opened Claude Desktop for Claudex. Start a session in the Code tab.")
     return 0
 
@@ -556,16 +564,23 @@ def _stop_for_update(settings: Settings) -> None:
 
 def _configure_desktop(state_dir: Path, port: int, *, export: bool) -> int:
     home, state_dir = _desktop_paths(state_dir)
-    published = GatewaySettingsStore(state_dir).settings(port)
+    snapshot = GatewaySettingsStore(state_dir).snapshot(port)
+    published = snapshot.settings
     result = configure_desktop(
-        home, state_dir, port, published, _desktop_helper_command(), export=export
+        home,
+        state_dir,
+        port,
+        published,
+        _desktop_helper_command(),
+        export=export,
+        effort_levels=snapshot.effort_levels,
     )
     if isinstance(result, Path):
         print(result)
         return 0
     port_option = f" --port {port}" if port != DEFAULT_PORT else ""
     try:
-        launch_desktop(home, state_dir, port, published)
+        launch_desktop(home, state_dir, port, published, effort_levels=snapshot.effort_levels)
     except GatewaySettingsError as exc:
         if result:
             raise GatewaySettingsError(

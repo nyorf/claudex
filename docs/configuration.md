@@ -127,8 +127,18 @@ restart the proxy and rerun `claudex configure` with Claude Code closed to refre
 
 On macOS, quit Claude Desktop and run `claudex desktop`. It prompts for ChatGPT sign-in if needed,
 starts or reuses the proxy, and sets up the local gateway profile before opening Desktop.
-The Code tab loads the model list from the gateway and runs a helper to read the saved gateway
-credential. If you move Claudex or change the gateway options, the launcher refreshes the profile.
+Claudex fills the model picker with the running proxy's available routes. The Code tab runs a
+helper to read the saved gateway credential. If you move Claudex or change the gateway options,
+the launcher refreshes the profile.
+
+Each bundled route offers **Effort** in Desktop's model picker. The `behavesAs` setting tells
+Desktop to use Claude Sonnet 5's effort controls. Claudex sends requests to the selected GPT
+model and translates the effort through the route's YAML mapping. For custom routes with a
+mapping that includes every level from low through its highest supported level, Desktop caps
+the picker at that level. Routes with gaps in their mapping stay selectable and use Desktop's
+default controls. If the proxy was running when you upgraded, quit Desktop, run `claudex stop`,
+then run `claudex desktop` to refresh the picker.
+[Desktop effort configuration](https://claude.com/docs/third-party/claude-desktop/models).
 
 To reopen Desktop, run `claudex desktop`. It reuses the matching proxy when it is running.
 Otherwise, it starts the proxy in the background with the saved profile, model, effort, and

@@ -97,10 +97,12 @@ claudex desktop
 Claudex prompts for sign-in when needed, starts or reuses the proxy, sets up the Desktop
 profile, and opens the app with the proxy's context window. In **Code**, start a session on
 **This computer** and pick a folder. Run `claudex desktop` again after a reboot.
+Choose **Effort** in the Desktop model picker for any bundled GPT route. If the control is
+missing after an update, see [Desktop setup](docs/configuration.md#claude-desktop).
 
 On a Desktop version where direct setup is unavailable, use `claudex configure desktop --export`.
 Import the generated file under **Developer → Configure Third-Party Inference**, apply the
-changes, and relaunch Desktop. See [Desktop setup](docs/configuration.md#claude-desktop).
+changes, and relaunch Desktop.
 
 ## Manage the proxy
 
@@ -131,8 +133,15 @@ registration, or `claudex remove personal` to forget the profile.
 
 `claudex models` lists the model-map path and routes, including their active context windows
 when the proxy is running. `claudex models --available` lists the account catalog's defaults.
-`claudex models --example` prints the bundled YAML. Save an edited copy to the model-map path
-or use `claudex cli --proxy-map ./models.yaml`.
+
+### Bundled YAML
+
+The bundled [`models.yaml`](https://github.com/nyorf/claudex/blob/master/src/claudex/config/models.yaml)
+lists each GPT target, its aliases, its fallback context window, and the GPT reasoning effort
+for each Claude effort level. The `default` route selects GPT-6.1 Sol at medium effort.
+Run `claudex models --example` to print the map from your installed version. Save an edited
+copy to the model-map path, or save it in the current directory and launch with
+`claudex cli --proxy-map ./models.yaml`.
 
 For each of the eight bundled models, Claudex uses a window of 872,000 tokens when the selected
 ChatGPT account's catalog reports support. Otherwise it uses the catalog default. You can

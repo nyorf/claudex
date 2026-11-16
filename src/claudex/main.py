@@ -201,7 +201,12 @@ async def _local_gateway(
                     base_url, gateway_token, persistence.effort, environ=os.environ
                 )
                 await to_thread.run_sync(
-                    persistence.store.publish,
+                    partial(
+                        persistence.store.publish,
+                        effort_levels={
+                            alias: tuple(route.efforts) for alias, route in launch.routes.items()
+                        },
+                    ),
                     port,
                     persistence.binding,
                     gateway_token,

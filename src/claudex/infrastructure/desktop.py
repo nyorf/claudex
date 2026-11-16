@@ -1,10 +1,11 @@
+import json
 import os
 import plistlib
 import re
 import shlex
 import stat
 import subprocess  # nosec B404
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from hashlib import sha256
 from hmac import compare_digest
@@ -31,6 +32,8 @@ _UUID = re.compile(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
 _HELPER_NAME = re.compile(r"credential-[0-9]+-[0-9a-f]{64}\.sh")
 _CONTEXT_ENV = "CLAUDE_CODE_MAX_CONTEXT_TOKENS"
 _COMPACTION_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+_MODEL_RECEIPT = f".claudex-models-{_PROFILE_ID}.json"
 _PROFILE_CONFLICTS = {
     "bootstrapUrl",
     "deploymentMode",
@@ -38,7 +41,6 @@ _PROFILE_CONFLICTS = {
     "inferenceCredentialHelperArgs",
     "inferenceGatewayApiKey",
     "inferenceGatewayManagedClaudeCode",
-    "inferenceModels",
 }
 
 
@@ -54,6 +56,7 @@ def configure_desktop(
     helper_command: tuple[str, ...],
     *,
     export: bool = False,
+    effort_levels: Mapping[str, tuple[str, ...]] | None = None,
 ) -> bool | Path:
     if not home.is_absolute() or not state_dir.is_absolute():
         raise GatewaySettingsError("Claude Desktop configuration requires absolute paths.")
@@ -76,6 +79,9 @@ def configure_desktop(
             "modelDiscoveryEnabled": True,
             "defaultModelEffort": effort,
         }
+        if effort_levels is not None:
+            profile["modelDiscoveryEnabled"] = False
+            profile["inferenceModels"] = _desktop_models(gateway_settings, effort_levels)
         if not export:
             _check_directory(home)
             _check_app()
@@ -101,6 +107,7 @@ def launch_desktop(
     gateway_settings: Settings,
     *,
     before_open: Callable[[], None] | None = None,
+    effort_levels: Mapping[str, tuple[str, ...]] | None = None,
 ) -> None:
     if not home.is_absolute() or not state_dir.is_absolute():
         raise GatewaySettingsError("Claude Desktop configuration requires absolute paths.")
@@ -110,14 +117,19 @@ def launch_desktop(
     support = home / "Library" / "Application Support"
     try:
         _check_directory(home)
-        _check_app(command="claudex desktop")
         _check_desktop_policy(support)
-        _check_active_profile(support / "Claude-3p", state_dir.resolve(), port, url, token)
+        root = support / "Claude-3p"
+        expected = (
+            None if effort_levels is None else _desktop_models(gateway_settings, effort_levels)
+        )
+        with _locked(root, ".claudex-desktop.lock"):
+            _check_app(command="claudex desktop")
+            _check_active_profile(root, state_dir.resolve(), port, url, token, expected)
+            if before_open is not None:
+                before_open()
+            _open_desktop(window)
     except OSError:
         raise GatewaySettingsError("Claudex could not access the Claude Desktop files.") from None
-    if before_open is not None:
-        before_open()
-    _open_desktop(window)
 
 
 def _desktop_window(settings: Settings) -> int:
@@ -152,7 +164,52 @@ def _desktop_window(settings: Settings) -> int:
     return smallest
 
 
-def _check_active_profile(root: Path, state_dir: Path, port: int, url: str, token: str) -> None:
+def _desktop_models(
+    settings: Settings, effort_levels: Mapping[str, tuple[str, ...]]
+) -> list[dict[str, str]]:
+    available = settings.get("availableModels")
+    picker = settings.get("modelPicker")
+    options = picker.get("options") if isinstance(picker, dict) else None
+    incomplete = "The gateway model list is incomplete. Restart the Claudex gateway."
+    if not isinstance(available, list) or not available or not isinstance(options, list):
+        raise GatewaySettingsError(incomplete)
+    labels = {
+        option["model"]: option["label"]
+        for option in options
+        if isinstance(option, dict)
+        and isinstance(option.get("model"), str)
+        and isinstance(option.get("label"), str)
+    }
+    result: list[dict[str, str]] = []
+    for model in available:
+        if not isinstance(model, str) or model not in labels or model not in effort_levels:
+            raise GatewaySettingsError(incomplete)
+        levels = effort_levels[model]
+        if (
+            not levels
+            or len(set(levels)) != len(levels)
+            or any(level not in _EFFORTS for level in levels)
+        ):
+            raise GatewaySettingsError(
+                "The gateway effort levels are invalid. Restart the Claudex gateway."
+            )
+        row = {"name": model, "labelOverride": labels[model]}
+        if set(levels) == set(_EFFORTS[: len(levels)]):
+            row["behavesAs"] = "claude-sonnet-5"
+            if len(levels) < len(_EFFORTS):
+                row["maxEffort"] = _EFFORTS[len(levels) - 1]
+        result.append(row)
+    return result
+
+
+def _check_active_profile(
+    root: Path,
+    state_dir: Path,
+    port: int,
+    url: str,
+    token: str,
+    expected: list[dict[str, str]] | None,
+) -> None:
     unavailable = "The matching Claudex profile is inactive. Run claudex configure desktop."
     library = root / "configLibrary"
     _check_directory(library)
@@ -170,11 +227,19 @@ def _check_active_profile(root: Path, state_dir: Path, port: int, url: str, toke
     if (
         profile.get("inferenceGatewayBaseUrl") != url
         or profile.get("inferenceGatewayAuthScheme") != "bearer"
-        or profile.get("modelDiscoveryEnabled") is not True
         or not isinstance(helper_setting, str)
     ):
         raise DesktopProfileSetupError(unavailable)
+    _check_model_ownership(root, profile)
     _merge_profile(profile, profile)
+    if (expected is None and profile.get("modelDiscoveryEnabled") is not True) or (
+        expected is not None
+        and (
+            profile.get("modelDiscoveryEnabled") is not False
+            or profile.get("inferenceModels") != expected
+        )
+    ):
+        raise DesktopProfileSetupError(unavailable)
     helper = Path(helper_setting)
     directory = state_dir / "desktop"
     if helper.parent != directory:
@@ -427,16 +492,45 @@ def _activate_profile(root: Path, helper: Path, script: bytes, profile: Settings
     old_meta = _read(meta_path)
     meta = _applied_profile(old_meta, library)
     current = _read(profile_path)
+    _check_model_ownership(root, current)
     profile = _merge_profile(current, profile)
     library.mkdir(mode=0o700, parents=True, exist_ok=True)
     helper_changed = _write_helper(helper, script)
+    if "inferenceModels" in profile:
+        old_digest = _model_digest(current.get("inferenceModels") if current else None)
+        new_digest = _model_digest(profile["inferenceModels"])
+        _write_private_json(
+            root / _MODEL_RECEIPT, {"digests": list(dict.fromkeys((old_digest, new_digest)))}
+        )
     profile_changed = _write_private_json(profile_path, profile)
+    if "inferenceModels" in profile:
+        _write_private_json(root / _MODEL_RECEIPT, {"digests": [new_digest]})
+    elif current and "inferenceModels" in current:
+        (root / _MODEL_RECEIPT).unlink(missing_ok=True)
     if old_meta != meta:
         _write(meta_path, meta)
     if old_mode.get("deploymentMode") != "3p":
         _write(mode_path, {**old_mode, "deploymentMode": "3p"})
         return True
     return helper_changed or profile_changed or old_meta != meta
+
+
+def _model_digest(models: object) -> str:
+    return sha256(json.dumps(models, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _check_model_ownership(root: Path, current: Settings | None) -> None:
+    if current is None or "inferenceModels" not in current:
+        return
+    path = root / _MODEL_RECEIPT
+    info = _file_info(path, private=True)
+    receipt = _read(path, private=True) if info is not None and info.st_uid == os.getuid() else None
+    digests = receipt.get("digests") if receipt else None
+    if not isinstance(digests, list) or _model_digest(current["inferenceModels"]) not in digests:
+        raise GatewaySettingsError(
+            "The Claudex Desktop profile has conflicting custom settings. "
+            "Keep it and use claudex configure desktop --export to create a separate profile."
+        )
 
 
 def _merge_profile(current: Settings | None, profile: Settings) -> Settings:
@@ -464,7 +558,10 @@ def _merge_profile(current: Settings | None, profile: Settings) -> Settings:
             "The Claudex Desktop profile has conflicting custom settings. "
             "Keep it and use claudex configure desktop --export to create a separate profile."
         )
-    return {**current, **profile}
+    merged = {**current, **profile}
+    if "inferenceModels" not in profile:
+        merged.pop("inferenceModels", None)
+    return merged
 
 
 def _applied_profile(meta: Settings | None, library: Path) -> Settings:

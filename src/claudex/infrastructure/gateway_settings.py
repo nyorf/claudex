@@ -70,6 +70,34 @@ class GatewaySnapshot(NamedTuple):
     settings: Settings
     binding: str
     launch: GatewayLaunch | None
+    effort_levels: dict[str, tuple[str, ...]] | None = None
+
+
+def _effort_levels(value: object, settings: Settings) -> dict[str, tuple[str, ...]]:
+    available = settings.get("availableModels")
+    invalid = "Saved gateway effort levels are invalid. Run claudex serve again."
+    if (
+        not isinstance(available, list)
+        or not all(isinstance(alias, str) and alias for alias in available)
+        or len(set(available)) != len(available)
+        or not isinstance(value, dict)
+        or set(value) != set(available)
+    ):
+        raise GatewaySettingsError(invalid)
+    result: dict[str, tuple[str, ...]] = {}
+    for alias, levels in value.items():
+        if (
+            not isinstance(levels, (list, tuple))
+            or not levels
+            or not all(isinstance(level, str) and level in _EFFORTS for level in levels)
+            or len(set(levels)) != len(levels)
+        ):
+            raise GatewaySettingsError(invalid)
+        result[alias] = tuple(levels)
+    return result
+
+
+_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 
 
 @contextmanager
@@ -239,6 +267,8 @@ class GatewaySettingsStore:
         token: str,
         settings: Settings,
         launch: GatewayLaunch | None = None,
+        *,
+        effort_levels: dict[str, tuple[str, ...]] | None = None,
     ) -> None:
         path = self._directory / _port_filename(port)
         with _locked(self._directory, "gateway.lock", private=True):
@@ -252,6 +282,10 @@ class GatewaySettingsStore:
             if not _matches_gateway(settings, port, token):
                 raise GatewaySettingsError("The Claude settings do not match the gateway.")
             update = {**record, "settings": settings}
+            if effort_levels is None:
+                update.pop("effort_levels", None)
+            else:
+                update["effort_levels"] = _effort_levels(effort_levels, settings)
             if launch is not None:
                 update["launch"] = launch.record()
             _write(path, update)
@@ -280,7 +314,12 @@ class GatewaySettingsStore:
                 raise GatewaySettingsError("Saved gateway settings are invalid.")
             value = record.get("launch")
             launch = GatewayLaunch.parse(value) if value is not None else None
-            return GatewaySnapshot(settings, binding, launch)
+            efforts = (
+                _effort_levels(record["effort_levels"], settings)
+                if "effort_levels" in record
+                else None
+            )
+            return GatewaySnapshot(settings, binding, launch, efforts)
 
 
 def _record_token(record: Settings) -> str:

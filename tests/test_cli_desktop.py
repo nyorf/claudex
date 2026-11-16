@@ -19,7 +19,9 @@ from claudex.infrastructure.gateway_settings import (
 _PORT = 18888
 
 
-def _publish(directory: Path, binding: str, port: int = _PORT) -> tuple[str, dict[str, Any]]:
+def _publish(
+    directory: Path, binding: str, port: int = _PORT, *, with_efforts: bool = False
+) -> tuple[str, dict[str, Any]]:
     store = GatewaySettingsStore(directory)
     token = store.load(port, binding)
     settings = {
@@ -29,7 +31,15 @@ def _publish(directory: Path, binding: str, port: int = _PORT) -> tuple[str, dic
             "ANTHROPIC_AUTH_TOKEN": token,
         },
     }
-    store.publish(port, binding, token, settings)
+    if with_efforts:
+        settings["availableModels"] = ["claudex-opus"]
+    store.publish(
+        port,
+        binding,
+        token,
+        settings,
+        effort_levels={"claudex-opus": ("low", "high")} if with_efforts else None,
+    )
     return token, settings
 
 
@@ -79,19 +89,21 @@ def test_old_configure_grammar_and_settings_are_preserved(
 
 
 @pytest.mark.parametrize(("export", "changed"), [(True, False), (False, True), (False, False)])
+@pytest.mark.parametrize("with_efforts", [True, False])
 def test_desktop_configuration_passes_an_absolute_helper_and_preserves_cli_settings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     export: bool,
     changed: bool,
+    with_efforts: bool,
 ) -> None:
     state, config = _isolated_paths(tmp_path, monkeypatch)
     config.mkdir()
     source = config / "settings.json"
     original = '{"theme":"dark"}'
     source.write_text(original, encoding="utf-8")
-    token, published = _publish(state, "profile-a")
+    token, published = _publish(state, "profile-a", with_efforts=with_efforts)
     output_path = state / "desktop-profile.json"
     calls: list[str] = []
 
@@ -103,18 +115,28 @@ def test_desktop_configuration_passes_an_absolute_helper_and_preserves_cli_setti
         helper_command: tuple[str, ...],
         *,
         export: bool = False,
+        effort_levels: dict[str, tuple[str, ...]] | None = None,
     ) -> bool | Path:
         assert home == tmp_path and state_dir == state and port == _PORT
         assert settings == published
+        assert effort_levels == ({"claudex-opus": ("low", "high")} if with_efforts else None)
         assert helper_command == (sys.executable, "-I", "-m", "claudex")
         assert Path(helper_command[0]).is_absolute()
         assert all(token not in part for part in helper_command)
         calls.append("export" if export else "configure")
         return output_path if export else changed
 
-    def launch(home: Path, state_dir: Path, port: int, gateway_settings: dict[str, Any]) -> None:
+    def launch(
+        home: Path,
+        state_dir: Path,
+        port: int,
+        gateway_settings: dict[str, Any],
+        *,
+        effort_levels: dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
         assert home == tmp_path and state_dir == state and port == _PORT
         assert gateway_settings == published
+        assert effort_levels == ({"claudex-opus": ("low", "high")} if with_efforts else None)
         calls.append("launch")
 
     monkeypatch.setattr(cli, "configure_desktop", configure)
@@ -158,15 +180,17 @@ def test_desktop_configuration_refuses_linux_without_reading_gateway_state(
 
 @pytest.mark.parametrize("port", [cli.DEFAULT_PORT, _PORT])
 @pytest.mark.parametrize("setup", [False, True])
+@pytest.mark.parametrize("with_efforts", [True, False])
 def test_desktop_launch_configures_a_new_profile_only_when_needed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     port: int,
     setup: bool,
+    with_efforts: bool,
 ) -> None:
     state, config = _isolated_paths(tmp_path, monkeypatch)
-    token, published = _publish(state, "profile-a", port)
+    token, published = _publish(state, "profile-a", port, with_efforts=with_efforts)
     calls: list[str] = []
 
     def launch(
@@ -174,9 +198,12 @@ def test_desktop_launch_configures_a_new_profile_only_when_needed(
         state_dir: Path,
         selected_port: int,
         gateway_settings: dict[str, Any],
+        *,
+        effort_levels: dict[str, tuple[str, ...]] | None = None,
     ) -> None:
         assert (home, state_dir, selected_port) == (tmp_path, state, port)
         assert gateway_settings == published
+        assert effort_levels == ({"claudex-opus": ("low", "high")} if with_efforts else None)
         if setup and "configure" not in calls:
             raise cli.DesktopProfileSetupError("Desktop profile needs setup.")
         calls.append("open")
@@ -186,8 +213,11 @@ def test_desktop_launch_configures_a_new_profile_only_when_needed(
         calls.append("gateway")
         return GatewaySettingsStore(state).snapshot(port)
 
-    def configure(*args: object) -> bool:
+    def configure(*args: object, **kwargs: object) -> bool:
         assert setup and args[:4] == (tmp_path, state, port, published)
+        assert kwargs["effort_levels"] == (
+            {"claudex-opus": ("low", "high")} if with_efforts else None
+        )
         calls.append("configure")
         return True
 
@@ -271,7 +301,7 @@ def test_desktop_configuration_reports_launch_failure_after_saving_profile(
     def configure(*args: object, **kwargs: object) -> bool:
         return True
 
-    def launch(*args: object) -> None:
+    def launch(*args: object, **kwargs: object) -> None:
         raise GatewaySettingsError("Claudex could not open Claude Desktop.")
 
     monkeypatch.setattr(sys, "platform", "darwin")

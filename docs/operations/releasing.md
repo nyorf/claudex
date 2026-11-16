@@ -67,21 +67,27 @@ Review the draft and complete the release checks before publishing it. The one-l
 use the latest published stable release. A draft remains unavailable to them until you publish it.
 See [managing GitHub releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository).
 
-The draft includes `claudex-homebrew-formula.tar.gz`. Extract it and replace `Formula/claudex.rb`
-in the tap with the generated file. Check the pinned source commit and bottle checksums. After
-publishing the release and pushing the formula, verify `brew install nyorf/claudex/claudex` on a
-matching bottle platform. In a separate Homebrew installation, use
+Publishing a stable release starts **Update Homebrew formula**. Each run checks the latest
+stable release's generated formula against its tag and the checksums of its four bottles.
+It commits any changes to `Formula/claudex.rb` on `master`. If the workflow fails, use the
+log to diagnose and fix the issue, then rerun it on `master` with
+`gh workflow run homebrew.yml --ref master`.
+
+After the formula update passes, verify that `brew install nyorf/claudex/claudex` installs
+the published bottle on a supported platform. In a separate Homebrew installation, test
 `brew install --build-from-source nyorf/claudex/claudex`. Run `claudex license` and `man claudex`
-with each installation. An Intel macOS source build needs an existing Homebrew toolchain with
+with each installation. An Intel macOS source build needs a Homebrew toolchain with
 Python 3.14, OpenSSL 3, pkgconf, Rust, and uv. [Homebrew Intel support](https://docs.brew.sh/Support-Tiers#macos-on-intel)
 
 ## Verify the Desktop Code tab
 
 Run `claudex configure desktop` on a supported macOS build with the app closed. In the Code
 tab, start a **This computer** session, check the model list, and send a prompt through the
-gateway. Switch through every available model in that session and record each `/context`
-window and auto-compaction buffer. Restart the proxy with the same options, quit Desktop, run
-`claudex desktop`, and repeat the connection and context checks.
+gateway. For each bundled route, choose a level under **Effort** and verify that the upstream
+request uses the reasoning effort set in the route's YAML mapping. Switch through every
+available model in that session and record each `/context` window and auto-compaction buffer.
+Restart the proxy with the same options, quit Desktop, run `claudex desktop`, and repeat the
+connection, effort, and context checks.
 
 Verify the export path by importing the generated JSON under **Developer → Configure
 Third-Party Inference**. See [Desktop gateway setup](https://code.claude.com/docs/en/llm-gateway-connect#desktop-app).

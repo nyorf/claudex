@@ -99,6 +99,45 @@ def test_restart_preserves_the_saved_launch_and_cannot_rotate_the_bearer(tmp_pat
     assert reopened.settings(8765) == settings
 
 
+def test_gateway_effort_levels_round_trip_and_legacy_fallback(tmp_path: Path) -> None:
+    store = GatewaySettingsStore(tmp_path)
+    token = store.load(8765, "binding-a")
+    settings = {**_settings(8765, token), "availableModels": ["claudex-opus", "claudex-sonnet"]}
+    levels = {"claudex-opus": ("low", "max"), "claudex-sonnet": ("high",)}
+    store.publish(8765, "binding-a", token, settings, effort_levels=levels)
+    record = _read(tmp_path / "gateways" / "8765.json")
+    assert record["effort_levels"] == {"claudex-opus": ["low", "max"], "claudex-sonnet": ["high"]}
+    assert "effort_levels" not in record["settings"]
+    assert store.snapshot(8765).effort_levels == levels
+    store.publish(8765, "binding-a", token, settings)
+    assert store.snapshot(8765).effort_levels is None
+
+
+@pytest.mark.parametrize(
+    "levels",
+    [
+        None,
+        {},
+        {"claudex-opus": []},
+        {"claudex-opus": ["invalid"]},
+        {"claudex-opus": ["high", "high"]},
+        {"claudex-opus": "high"},
+        {"claudex-opus": ["high"], "extra": ["high"]},
+    ],
+)
+def test_gateway_rejects_corrupted_effort_levels(tmp_path: Path, levels: object) -> None:
+    store = GatewaySettingsStore(tmp_path)
+    token = store.load(8765, "binding-a")
+    settings = {**_settings(8765, token), "availableModels": ["claudex-opus"]}
+    store.publish(8765, "binding-a", token, settings)
+    path = tmp_path / "gateways" / "8765.json"
+    record = _read(path)
+    record["effort_levels"] = levels
+    path.write_text(json.dumps(record))
+    with pytest.raises(GatewaySettingsError, match="effort levels are invalid.*serve"):
+        store.snapshot(8765)
+
+
 def test_configure_merges_and_restore_preserves_unrelated_edits(tmp_path: Path) -> None:
     path = tmp_path / "settings.json"
     original = {
