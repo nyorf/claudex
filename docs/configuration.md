@@ -5,6 +5,27 @@ sidebar_position: 3
 
 # Configuration
 
+## macOS Keychain prompt
+
+Claudex stores your ChatGPT sign-in credentials under `org.claudex.chatgpt` in Keychain.
+macOS may ask for permission when Claudex opens a saved profile. Enter your `login` keychain
+password in the macOS dialog. It usually matches the password you use to sign in to your Mac.
+If the passwords differ, use the `login` keychain password.
+[Apple’s guide to the keychain password](https://support.apple.com/en-gb/guide/keychain-access/kyca2429/mac).
+
+- **Allow** grants access for this request only.
+- **Always Allow** lets this copy of Claudex access this item again without prompting.
+- **Deny** blocks this request.
+
+See [Apple’s guide to allowing app access](https://support.apple.com/en-gb/guide/mac-help/kychn002/26/mac/26).
+
+macOS may ask again after a Claudex update, including one installed through Homebrew.
+Approve the prompt to reuse the saved credential for your existing profile.
+[Apple’s guide to app access after an update](https://support.apple.com/guide/keychain-access/if-a-trusted-app-asks-for-keychain-access-kyca1331/mac).
+
+If access fails, retry the Claudex command in a terminal in your macOS desktop session and
+approve the prompt. If the `login` keychain is locked, unlock it in Keychain Access and retry.
+
 ## Model map
 
 Select `--model gpt-6.1-sol` to use the GPT name or `--model opus` to use the bundled

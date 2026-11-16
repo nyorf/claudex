@@ -68,6 +68,13 @@ From the project you want to work in, run `claudex cli`. It prompts for a ChatGP
 and opens browser sign-in when needed. It then starts or reuses the background proxy and
 launches Claude Code. Claude options and subcommands pass through to the installed executable.
 
+When Claudex opens a saved profile, macOS may ask whether Claudex can access
+`org.claudex.chatgpt` in Keychain. Enter your `login` keychain password in that dialog. It
+usually matches the password you use to sign in to your Mac. Choose **Allow** for this
+request or **Always Allow** to save permission for this copy of Claudex.
+See [macOS Keychain prompt](docs/configuration.md#macos-keychain-prompt) if the prompt returns
+after an update or access fails.
+
 ```sh
 claudex cli --resume
 claudex cli --proxy-profile work -p "Summarize this project" --output-format json

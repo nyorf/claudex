@@ -444,7 +444,7 @@ async def _accounts(args: argparse.Namespace, accounts: AccountManager) -> None:
 async def _status(args: argparse.Namespace, settings: Settings, accounts: AccountManager) -> None:
     port = args.port
     status = gateway_status(settings.state_dir, port)
-    print(f"Proxy  {status} (http://127.0.0.1:{port})")
+    print(f"Proxy {status} (http://127.0.0.1:{port})")
     snapshot = _saved_snapshot(settings, port) if status == "running" else None
     if snapshot is not None and snapshot.launch is not None:
         print(f"Proxy profile  {snapshot.launch.profile}")
