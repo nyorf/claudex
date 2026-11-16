@@ -71,6 +71,32 @@ class GatewaySnapshot(NamedTuple):
     binding: str
     launch: GatewayLaunch | None
     effort_levels: dict[str, tuple[str, ...]] | None = None
+    desktop_models: dict[str, str] | None = None
+    desktop_families: dict[str, str] | None = None
+
+
+def _desktop_mapping(
+    settings: Settings, models: object, families: object
+) -> tuple[dict[str, str], dict[str, str]]:
+    available = settings.get("availableModels")
+    invalid = "Saved Desktop model mappings are invalid. Run claudex serve again."
+    if (
+        not isinstance(available, list)
+        or not all(isinstance(alias, str) and alias for alias in available)
+        or len(set(available)) != len(available)
+        or not isinstance(models, dict)
+        or set(models) != set(available)
+        or not all(
+            isinstance(wire, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,128}", wire)
+            for wire in models.values()
+        )
+        or len(set(models.values())) != len(models)
+        or not isinstance(families, dict)
+        or not set(families).issubset({"opus", "sonnet", "haiku", "fable"})
+        or not all(isinstance(target, str) and target in available for target in families.values())
+    ):
+        raise GatewaySettingsError(invalid)
+    return dict(models), dict(families)
 
 
 def _effort_levels(value: object, settings: Settings) -> dict[str, tuple[str, ...]]:
@@ -260,6 +286,15 @@ class GatewaySettingsStore:
             _write(path, {"binding": binding, "token": token})
             return token
 
+    def migrate_binding(self, port: int, previous: str, current: str) -> None:
+        path = self._directory / _port_filename(port)
+        with _locked(self._directory, "gateway.lock", private=True):
+            record = _read(path, private=True)
+            if record is None or record.get("binding") != previous:
+                raise GatewaySettingsError("The saved gateway changed. Run claudex serve again.")
+            _record_token(record)
+            _write(path, {**record, "binding": current})
+
     def publish(
         self,
         port: int,
@@ -269,6 +304,8 @@ class GatewaySettingsStore:
         launch: GatewayLaunch | None = None,
         *,
         effort_levels: dict[str, tuple[str, ...]] | None = None,
+        desktop_models: dict[str, str] | None = None,
+        desktop_families: dict[str, str] | None = None,
     ) -> None:
         path = self._directory / _port_filename(port)
         with _locked(self._directory, "gateway.lock", private=True):
@@ -286,6 +323,13 @@ class GatewaySettingsStore:
                 update.pop("effort_levels", None)
             else:
                 update["effort_levels"] = _effort_levels(effort_levels, settings)
+            if desktop_models is None and desktop_families is None:
+                update.pop("desktop_models", None)
+                update.pop("desktop_families", None)
+            else:
+                models, families = _desktop_mapping(settings, desktop_models, desktop_families)
+                update["desktop_models"] = models
+                update["desktop_families"] = families
             if launch is not None:
                 update["launch"] = launch.record()
             _write(path, update)
@@ -319,7 +363,14 @@ class GatewaySettingsStore:
                 if "effort_levels" in record
                 else None
             )
-            return GatewaySnapshot(settings, binding, launch, efforts)
+            desktop = (
+                _desktop_mapping(
+                    settings, record.get("desktop_models"), record.get("desktop_families")
+                )
+                if "desktop_models" in record or "desktop_families" in record
+                else (None, None)
+            )
+            return GatewaySnapshot(settings, binding, launch, efforts, *desktop)
 
 
 def _record_token(record: Settings) -> str:

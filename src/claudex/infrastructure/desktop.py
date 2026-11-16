@@ -57,6 +57,8 @@ def configure_desktop(
     *,
     export: bool = False,
     effort_levels: Mapping[str, tuple[str, ...]] | None = None,
+    desktop_models: Mapping[str, str] | None = None,
+    desktop_families: Mapping[str, str] | None = None,
 ) -> bool | Path:
     if not home.is_absolute() or not state_dir.is_absolute():
         raise GatewaySettingsError("Claude Desktop configuration requires absolute paths.")
@@ -81,7 +83,9 @@ def configure_desktop(
         }
         if effort_levels is not None:
             profile["modelDiscoveryEnabled"] = False
-            profile["inferenceModels"] = _desktop_models(gateway_settings, effort_levels)
+            profile["inferenceModels"] = _desktop_models(
+                gateway_settings, effort_levels, desktop_models, desktop_families
+            )
         if not export:
             _check_directory(home)
             _check_app()
@@ -108,6 +112,8 @@ def launch_desktop(
     *,
     before_open: Callable[[], None] | None = None,
     effort_levels: Mapping[str, tuple[str, ...]] | None = None,
+    desktop_models: Mapping[str, str] | None = None,
+    desktop_families: Mapping[str, str] | None = None,
 ) -> None:
     if not home.is_absolute() or not state_dir.is_absolute():
         raise GatewaySettingsError("Claude Desktop configuration requires absolute paths.")
@@ -120,7 +126,9 @@ def launch_desktop(
         _check_desktop_policy(support)
         root = support / "Claude-3p"
         expected = (
-            None if effort_levels is None else _desktop_models(gateway_settings, effort_levels)
+            None
+            if effort_levels is None
+            else _desktop_models(gateway_settings, effort_levels, desktop_models, desktop_families)
         )
         with _locked(root, ".claudex-desktop.lock"):
             _check_app(command="claudex desktop")
@@ -165,8 +173,11 @@ def _desktop_window(settings: Settings) -> int:
 
 
 def _desktop_models(
-    settings: Settings, effort_levels: Mapping[str, tuple[str, ...]]
-) -> list[dict[str, str]]:
+    settings: Settings,
+    effort_levels: Mapping[str, tuple[str, ...]],
+    model_ids: Mapping[str, str] | None = None,
+    families: Mapping[str, str] | None = None,
+) -> list[Settings]:
     available = settings.get("availableModels")
     picker = settings.get("modelPicker")
     options = picker.get("options") if isinstance(picker, dict) else None
@@ -180,9 +191,12 @@ def _desktop_models(
         and isinstance(option.get("model"), str)
         and isinstance(option.get("label"), str)
     }
-    result: list[dict[str, str]] = []
+    tiers = {model: family for family, model in (families or {}).items()}
+    result: list[Settings] = []
     for model in available:
         if not isinstance(model, str) or model not in labels or model not in effort_levels:
+            raise GatewaySettingsError(incomplete)
+        if model_ids is not None and model not in model_ids:
             raise GatewaySettingsError(incomplete)
         levels = effort_levels[model]
         if (
@@ -193,7 +207,13 @@ def _desktop_models(
             raise GatewaySettingsError(
                 "The gateway effort levels are invalid. Restart the Claudex gateway."
             )
-        row = {"name": model, "labelOverride": labels[model]}
+        row: Settings = {
+            "name": model if model_ids is None else model_ids[model],
+            "labelOverride": labels[model],
+        }
+        if model in tiers:
+            row["anthropicFamilyTier"] = tiers[model]
+            row["isFamilyDefault"] = True
         if set(levels) == set(_EFFORTS[: len(levels)]):
             row["behavesAs"] = "claude-sonnet-5"
             if len(levels) < len(_EFFORTS):
@@ -208,7 +228,7 @@ def _check_active_profile(
     port: int,
     url: str,
     token: str,
-    expected: list[dict[str, str]] | None,
+    expected: list[Settings] | None,
 ) -> None:
     unavailable = "The matching Claudex profile is inactive. Run claudex configure desktop."
     library = root / "configLibrary"

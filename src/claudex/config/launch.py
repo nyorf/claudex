@@ -1,10 +1,11 @@
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 from claudex.config.models import ModelConfigError, ModelMap
-from claudex.domain.models import ModelRoute
+from claudex.domain.models import ModelRoute, model_family
 from claudex.infrastructure.catalog import CatalogModel
 
 _PROVIDER_ENV = (
@@ -29,6 +30,16 @@ _OTHER_PROVIDER_SWITCHES = (
     "CLAUDE_CODE_USE_MANTLE",
 )
 _FAMILIES = ("opus", "sonnet", "haiku", "fable")
+_DESKTOP_FAMILY_MODELS = {
+    "opus": "claude-opus-5-5",
+    "sonnet": "claude-sonnet-5-5",
+    "haiku": "claude-haiku-5-5",
+    "fable": "claude-fable-5-2",
+}
+_DESKTOP_OTHER_MODELS = {
+    "claudex-sonnet-4-6": "claudex-terra-5-6",
+    "claudex-haiku-4-5": "claudex-luna-5-6",
+}
 _PREFERRED_CONTEXT_WINDOW = 872_000
 _MIN_COMPACTION_WINDOW = 100_000
 _MAX_COMPACTION_WINDOW = 1_000_000
@@ -118,6 +129,58 @@ class Launch:
     routes: dict[str, ModelRoute]
     context_window: int
     context_source: str
+    aliases: dict[str, str] = field(default_factory=dict)
+    families: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def desktop_families(self) -> dict[str, str]:
+        chosen: dict[str, str] = {}
+        for family in _FAMILIES:
+            target = self.families.get(family)
+            if target is None:
+                continue
+            existing = next((name for name, route in chosen.items() if route == target), None)
+            if existing is None:
+                chosen[family] = target
+            elif target == f"claudex-{family}":
+                del chosen[existing]
+                chosen[family] = target
+        return chosen
+
+    @property
+    def desktop_models(self) -> dict[str, str]:
+        candidates = {
+            target: _DESKTOP_FAMILY_MODELS[family]
+            for family, target in self.desktop_families.items()
+        }
+        result: dict[str, str] = {}
+        used: set[str] = set()
+        for alias in self.routes:
+            wire = candidates.get(alias, _DESKTOP_OTHER_MODELS.get(alias, alias))
+            if wire == alias and "haiku" in wire:
+                wire = f"claudex-route-{sha256(alias.encode()).hexdigest()[:16]}"
+            conflict = wire in self.aliases and self.aliases[wire] != alias
+            if (
+                wire in used
+                or (wire in self.routes and wire != alias)
+                or (conflict and wire != candidates.get(alias))
+            ):
+                wire = f"claudex-route-{sha256(alias.encode()).hexdigest()[:32]}"
+            if (
+                wire in used
+                or (wire in self.routes and wire != alias)
+                or (
+                    wire in self.aliases
+                    and self.aliases[wire] != alias
+                    and wire != candidates.get(alias)
+                )
+            ):
+                raise ModelConfigError(
+                    "Desktop model IDs collide. Change the model map route names."
+                )
+            result[alias] = wire
+            used.add(wire)
+        return result
 
     @property
     def _maximum_window(self) -> int:
@@ -196,7 +259,7 @@ class Launch:
             ENABLE_CLAUDEAI_MCP_SERVERS="false",
         )
         for family in _FAMILIES:
-            alias = f"claudex-{family}"
+            alias = self.families.get(family, f"claudex-{family}")
             env[f"ANTHROPIC_DEFAULT_{family.upper()}_MODEL"] = (
                 alias if alias in self.routes else self.model
             )
@@ -277,4 +340,13 @@ def plan_launch(
     for alias, candidate in routes.items():
         _compaction_window(alias, candidate.context_window, maximum)
     window, source = contexts[selected]
-    return Launch(selected, routes, window, source)
+    missing_families = set(model_map.families) - {
+        family for family, target in model_map.families.items() if target in routes
+    }
+    aliases = {
+        alias: target
+        for alias, target in model_map.aliases.items()
+        if target in routes and model_family(alias) not in missing_families
+    }
+    families = {family: target for family, target in model_map.families.items() if target in routes}
+    return Launch(selected, routes, window, source, aliases, families)

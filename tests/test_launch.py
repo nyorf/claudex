@@ -142,6 +142,146 @@ def test_invalid_alias_or_effort_fails_before_launch(tmp_path: Path) -> None:
         launch.arguments(tmp_path / "settings.json", "high", ["--cloud"])
 
 
+def test_family_versions_use_the_primary_route_and_gpt_ids_keep_their_route(tmp_path: Path) -> None:
+    model_map = load_model_map(tmp_path / "models.yaml")
+    for name, expected in {
+        "claude-opus-5": "claudex-opus",
+        "claude-3-opus-20240229": "claudex-opus",
+        "claude-sonnet-4-6": "claudex-sonnet",
+        "claude-3-5-sonnet-20241022": "claudex-sonnet",
+        "claude-haiku-4-5-20251001": "claudex-haiku",
+        "claude-3-5-haiku-20241022": "claudex-haiku",
+        "apac.anthropic.claude-3-5-haiku-20241022-v1:0": "claudex-haiku",
+        "jp.anthropic.claude-opus-5-5[1m]": "claudex-opus",
+        "claude-fable-5-2": "claudex-fable",
+        "gpt-5.6-sol": "claudex-opus-5",
+        "gpt-5.6-terra": "claudex-sonnet-4-6",
+        "gpt-5.6-luna": "claudex-haiku-4-5",
+    }.items():
+        assert model_map.resolve(name) == expected
+    with pytest.raises(ModelConfigError, match="Unknown model"):
+        model_map.resolve("claude-sonnet-other")
+
+
+def test_desktop_wire_ids_stay_unique_for_saved_route_names(tmp_path: Path) -> None:
+    model_map = load_model_map(tmp_path / "models.yaml")
+    catalog = {
+        route.model: CatalogModel(route.model, 872_000) for route in model_map.routes.values()
+    }
+    launch = plan_launch(model_map, None, catalog)
+    assert launch.desktop_models == {
+        "claudex-opus": "claude-opus-5-5",
+        "claudex-fable": "claude-fable-5-2",
+        "claudex-sonnet": "claude-sonnet-5-5",
+        "claudex-sonnet-5": "claudex-sonnet-5",
+        "claudex-haiku": "claude-haiku-5-5",
+        "claudex-opus-5": "claudex-opus-5",
+        "claudex-sonnet-4-6": "claudex-terra-5-6",
+        "claudex-haiku-4-5": "claudex-luna-5-6",
+    }
+    assert launch.families == {
+        "opus": "claudex-opus",
+        "sonnet": "claudex-sonnet",
+        "haiku": "claudex-haiku",
+        "fable": "claudex-fable",
+    }
+
+
+def test_saved_map_family_routes_take_precedence_over_old_version_aliases(tmp_path: Path) -> None:
+    path = tmp_path / "models.yaml"
+    path.write_text(
+        """
+default: claudex-primary
+routes:
+  claudex-primary:
+    label: Primary
+    model: gpt-primary
+    aliases: [sonnet]
+    context_window: 200000
+    efforts: {high: high}
+  claudex-old:
+    label: Old
+    model: gpt-old
+    aliases: [claude-sonnet-4-6]
+    context_window: 200000
+    efforts: {high: high}
+"""
+    )
+    model_map = load_model_map(path)
+    assert model_map.resolve("claude-sonnet-4-6") == "claudex-primary"
+    launch = plan_launch(
+        model_map,
+        "claude-sonnet-4-6",
+        {
+            "gpt-primary": CatalogModel("gpt-primary", 200_000),
+            "gpt-old": CatalogModel("gpt-old", 200_000),
+        },
+    )
+    assert (
+        launch.environment({}, "http://127.0.0.1:8765", "synthetic")[
+            "ANTHROPIC_DEFAULT_SONNET_MODEL"
+        ]
+        == "claudex-primary"
+    )
+
+
+def test_version_alias_without_family_and_missing_primary_are_distinct(tmp_path: Path) -> None:
+    path = tmp_path / "models.yaml"
+    path.write_text(
+        """
+default: claudex-alternate
+routes:
+  claudex-alternate:
+    label: Alternate
+    model: gpt-alternate
+    aliases: [claude-sonnet-4-6]
+    context_window: 200000
+    efforts: {high: high}
+"""
+    )
+    unpinned = load_model_map(path)
+    assert unpinned.resolve("claude-sonnet-4-6") == "claudex-alternate"
+    catalog = {"gpt-alternate": CatalogModel("gpt-alternate", 200_000)}
+    assert plan_launch(unpinned, None, catalog).aliases["claude-sonnet-4-6"] == "claudex-alternate"
+    path.write_text(
+        path.read_text()
+        + """
+  claudex-sonnet:
+    label: Primary
+    model: gpt-missing
+    context_window: 200000
+    efforts: {high: high}
+"""
+    )
+    pinned = load_model_map(path)
+    assert pinned.resolve("claude-sonnet-4-6") == "claudex-sonnet"
+    launch = plan_launch(pinned, None, catalog)
+    assert "sonnet" not in launch.families
+    assert "claude-sonnet-4-6" not in launch.aliases
+
+
+def test_shared_family_pins_have_one_deterministic_desktop_family(tmp_path: Path) -> None:
+    path = tmp_path / "models.yaml"
+    path.write_text(
+        """
+default: claudex-haiku
+routes:
+  claudex-haiku:
+    label: Shared
+    model: gpt-shared
+    aliases: [opus, haiku]
+    context_window: 200000
+    efforts: {high: high}
+"""
+    )
+    launch = plan_launch(
+        load_model_map(path), None, {"gpt-shared": CatalogModel("gpt-shared", 200_000)}
+    )
+    assert launch.families == {"opus": "claudex-haiku", "haiku": "claudex-haiku"}
+    assert launch.desktop_families == {"haiku": "claudex-haiku"}
+    assert launch.desktop_models == {"claudex-haiku": "claude-haiku-5-5"}
+
+
 def test_yaml_duplicate_keys_fail(tmp_path: Path) -> None:
     path = tmp_path / "models.yaml"
     path.write_text("default: claudex-one\ndefault: claudex-two\n", encoding="utf-8")

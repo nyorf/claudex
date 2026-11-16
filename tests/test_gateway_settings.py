@@ -1,13 +1,20 @@
+import asyncio
 import json
 import os
+import socket
 import stat
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+import httpx2
 import pytest
 
+from claudex.config.launch import plan_launch
+from claudex.config.models import load_model_map
 from claudex.infrastructure import gateway_settings
+from claudex.infrastructure.catalog import CatalogModel
 from claudex.infrastructure.gateway_settings import (
     GatewayLaunch,
     GatewaySettingsError,
@@ -15,6 +22,7 @@ from claudex.infrastructure.gateway_settings import (
     configure_claude,
     unconfigure_claude,
 )
+from claudex.main import _gateway_binding, serve_gateway
 
 
 def _settings(port: int, token: str) -> dict[str, Any]:
@@ -111,6 +119,101 @@ def test_gateway_effort_levels_round_trip_and_legacy_fallback(tmp_path: Path) ->
     assert store.snapshot(8765).effort_levels == levels
     store.publish(8765, "binding-a", token, settings)
     assert store.snapshot(8765).effort_levels is None
+
+
+def test_desktop_mappings_round_trip_and_reject_corrupt_records(tmp_path: Path) -> None:
+    store = GatewaySettingsStore(tmp_path)
+    token = store.load(8765, "binding-a")
+    settings = {**_settings(8765, token), "availableModels": ["claudex-opus", "claudex-sonnet"]}
+    models = {"claudex-opus": "claude-opus-5-5", "claudex-sonnet": "claude-sonnet-5-5"}
+    families = {"opus": "claudex-opus", "sonnet": "claudex-sonnet"}
+    store.publish(
+        8765, "binding-a", token, settings, desktop_models=models, desktop_families=families
+    )
+    snapshot = store.snapshot(8765)
+    assert snapshot.desktop_models == models and snapshot.desktop_families == families
+    path = tmp_path / "gateways" / "8765.json"
+    record = _read(path)
+    record["desktop_models"]["claudex-sonnet"] = "claude-opus-5-5"
+    path.write_text(json.dumps(record))
+    with pytest.raises(GatewaySettingsError, match="Desktop model mappings are invalid"):
+        store.snapshot(8765)
+
+
+async def test_saved_gateway_migrates_previous_binding_without_changing_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_map = load_model_map(tmp_path / "missing.yaml")
+    catalog = {
+        route.model: CatalogModel(route.model, 872_000) for route in model_map.routes.values()
+    }
+    launch = plan_launch(model_map, None, catalog)
+    legacy = _gateway_binding("synthetic-registration", launch, "high", legacy=True)
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    store = GatewaySettingsStore(tmp_path)
+    token = store.load(port, legacy)
+    store.publish(
+        port,
+        legacy,
+        token,
+        launch.persistent_settings(f"http://127.0.0.1:{port}", token, "high", environ={}),
+    )
+
+    class Provider:
+        async def access_token(self, *, refresh_if: str | None = None) -> str:
+            return "synthetic"
+
+    async def verify_running(*_args: object) -> int:
+        async with httpx2.AsyncClient(trust_env=False) as client:
+            response = await client.get(
+                f"http://127.0.0.1:{port}/v1/models", headers={"x-api-key": token}
+            )
+        assert response.status_code == 200
+        assert store.snapshot(port).desktop_models == launch.desktop_models
+        assert store.snapshot(port).desktop_families == launch.desktop_families
+        return 0
+
+    monkeypatch.setattr("claudex.main._wait_for_stop", verify_running)
+    publishing = threading.Event()
+    proceed = threading.Event()
+    publish = GatewaySettingsStore.publish
+
+    def wait_before_publish(self: GatewaySettingsStore, *args: Any, **kwargs: Any) -> None:
+        publishing.set()
+        assert proceed.wait(10)
+        publish(self, *args, **kwargs)
+
+    monkeypatch.setattr(GatewaySettingsStore, "publish", wait_before_publish)
+    async with httpx2.AsyncClient() as client:
+        task = asyncio.create_task(
+            serve_gateway(
+                client,
+                Provider(),
+                launch,
+                "high",
+                port=port,
+                state_dir=tmp_path,
+                binding="synthetic-registration",
+                expected_binding=legacy,
+            )
+        )
+        try:
+            assert await asyncio.to_thread(publishing.wait, 5)
+            async with httpx2.AsyncClient(trust_env=False, timeout=0.2) as probe:
+                with pytest.raises(httpx2.TimeoutException):
+                    await probe.get(
+                        f"http://127.0.0.1:{port}/health/ready",
+                        headers={"x-claudex-challenge": "a" * 64},
+                    )
+        finally:
+            proceed.set()
+        assert await task == 0
+    snapshot = store.snapshot(port)
+    assert snapshot.binding == _gateway_binding("synthetic-registration", launch, "high")
+    assert snapshot.settings["env"]["ANTHROPIC_AUTH_TOKEN"] == token
+    assert snapshot.desktop_models == launch.desktop_models
 
 
 @pytest.mark.parametrize(

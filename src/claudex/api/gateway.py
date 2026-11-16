@@ -88,6 +88,8 @@ def create_gateway(
     token_provider: TokenProvider,
     gateway_token: str,
     stop: Callable[[], None] | None = None,
+    aliases: dict[str, str] | None = None,
+    families: dict[str, str] | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.add_exception_handler(ValidationError, _validation_error)
@@ -97,6 +99,8 @@ def create_gateway(
     router = APIRouter()
     upstream = ResponsesClient(client, token_provider)
     route_snapshot = dict(routes)
+    alias_snapshot = dict(aliases or {})
+    family_snapshot = dict(families or {})
     expected_token = gateway_token.encode("utf-8")
     shutdown = _Shutdown(expected_token, stop)
     router.add_api_route("/control/challenge", shutdown.challenge, methods=["GET"])
@@ -144,7 +148,9 @@ def create_gateway(
         body: Annotated[MessagesRequest, Depends(_messages_body)],
     ) -> Response:
         try:
-            inference = prepare_request(body.model_dump(exclude_none=True), route_snapshot)
+            inference = prepare_request(
+                body.model_dump(exclude_none=True), route_snapshot, alias_snapshot, family_snapshot
+            )
         except InvalidMessagesRequestError as exc:
             return _error_json(gateway_error(exc))
         return _InferenceResponse(upstream, inference)

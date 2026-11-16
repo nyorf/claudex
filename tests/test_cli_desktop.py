@@ -39,6 +39,8 @@ def _publish(
         token,
         settings,
         effort_levels={"claudex-opus": ("low", "high")} if with_efforts else None,
+        desktop_models={"claudex-opus": "claude-opus-5-5"} if with_efforts else None,
+        desktop_families={"opus": "claudex-opus"} if with_efforts else None,
     )
     return token, settings
 
@@ -116,10 +118,14 @@ def test_desktop_configuration_passes_an_absolute_helper_and_preserves_cli_setti
         *,
         export: bool = False,
         effort_levels: dict[str, tuple[str, ...]] | None = None,
+        desktop_models: dict[str, str] | None = None,
+        desktop_families: dict[str, str] | None = None,
     ) -> bool | Path:
         assert home == tmp_path and state_dir == state and port == _PORT
         assert settings == published
         assert effort_levels == ({"claudex-opus": ("low", "high")} if with_efforts else None)
+        assert desktop_models == ({"claudex-opus": "claude-opus-5-5"} if with_efforts else None)
+        assert desktop_families == ({"opus": "claudex-opus"} if with_efforts else None)
         assert helper_command == (sys.executable, "-I", "-m", "claudex")
         assert Path(helper_command[0]).is_absolute()
         assert all(token not in part for part in helper_command)
@@ -133,10 +139,14 @@ def test_desktop_configuration_passes_an_absolute_helper_and_preserves_cli_setti
         gateway_settings: dict[str, Any],
         *,
         effort_levels: dict[str, tuple[str, ...]] | None = None,
+        desktop_models: dict[str, str] | None = None,
+        desktop_families: dict[str, str] | None = None,
     ) -> None:
         assert home == tmp_path and state_dir == state and port == _PORT
         assert gateway_settings == published
         assert effort_levels == ({"claudex-opus": ("low", "high")} if with_efforts else None)
+        assert desktop_models == ({"claudex-opus": "claude-opus-5-5"} if with_efforts else None)
+        assert desktop_families == ({"opus": "claudex-opus"} if with_efforts else None)
         calls.append("launch")
 
     monkeypatch.setattr(cli, "configure_desktop", configure)
@@ -200,10 +210,14 @@ def test_desktop_launch_configures_a_new_profile_only_when_needed(
         gateway_settings: dict[str, Any],
         *,
         effort_levels: dict[str, tuple[str, ...]] | None = None,
+        desktop_models: dict[str, str] | None = None,
+        desktop_families: dict[str, str] | None = None,
     ) -> None:
         assert (home, state_dir, selected_port) == (tmp_path, state, port)
         assert gateway_settings == published
         assert effort_levels == ({"claudex-opus": ("low", "high")} if with_efforts else None)
+        assert desktop_models == ({"claudex-opus": "claude-opus-5-5"} if with_efforts else None)
+        assert desktop_families == ({"opus": "claudex-opus"} if with_efforts else None)
         if setup and "configure" not in calls:
             raise cli.DesktopProfileSetupError("Desktop profile needs setup.")
         calls.append("open")

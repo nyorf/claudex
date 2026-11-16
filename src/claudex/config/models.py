@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
-from claudex.domain.models import ModelRoute
+from claudex.domain.models import ModelRoute, resolve_route
 
 _RouteName = Annotated[str, Field(pattern=r"^claudex-[a-z0-9]+(?:-[a-z0-9]+)*$")]
 _Alias = Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{1,128}$")]
@@ -62,13 +62,21 @@ class ModelMap:
     aliases: dict[str, str]
     context_window_overrides: dict[str, dict[str, int]] = field(default_factory=dict)
 
+    @property
+    def families(self) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for family in ("opus", "sonnet", "haiku", "fable"):
+            target = self.aliases.get(family, f"claudex-{family}")
+            if target in self.routes:
+                result[family] = target
+        return result
+
     def resolve(self, name: str | None) -> str:
         if name is None:
             return self.default
-        if name in self.routes:
-            return name
-        if name in self.aliases:
-            return self.aliases[name]
+        target = resolve_route(name, self.routes, self.aliases, self.families)
+        if target is not None:
+            return target
         raise ModelConfigError("Unknown model. Run claudex models to see the configured routes.")
 
 

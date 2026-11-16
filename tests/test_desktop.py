@@ -454,16 +454,36 @@ def test_explicit_models_preserve_labels_and_only_offer_supported_efforts(tmp_pa
         "claudex-custom": ("low", "high"),
     }
     output = desktop.configure_desktop(
-        tmp_path, tmp_path / "state", 8765, settings, _COMMAND, export=True, effort_levels=levels
+        tmp_path,
+        tmp_path / "state",
+        8765,
+        settings,
+        _COMMAND,
+        export=True,
+        effort_levels=levels,
+        desktop_models={
+            "claudex-opus": "claude-opus-5-5",
+            "claudex-sonnet": "claude-sonnet-5-5",
+            "claudex-custom": "claudex-custom",
+        },
+        desktop_families={"opus": "claudex-opus", "sonnet": "claudex-sonnet"},
     )
     assert isinstance(output, Path)
     profile = _json(output)
     assert profile["modelDiscoveryEnabled"] is False
     assert profile["inferenceModels"] == [
-        {"name": "claudex-opus", "labelOverride": "Opus", "behavesAs": "claude-sonnet-5"},
         {
-            "name": "claudex-sonnet",
+            "name": "claude-opus-5-5",
+            "labelOverride": "Opus",
+            "anthropicFamilyTier": "opus",
+            "isFamilyDefault": True,
+            "behavesAs": "claude-sonnet-5",
+        },
+        {
+            "name": "claude-sonnet-5-5",
             "labelOverride": "Sonnet",
+            "anthropicFamilyTier": "sonnet",
+            "isFamilyDefault": True,
             "behavesAs": "claude-sonnet-5",
             "maxEffort": "high",
         },

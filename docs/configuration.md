@@ -131,13 +131,32 @@ Claudex fills the model picker with the running proxy's available routes. The Co
 helper to read the saved gateway credential. If you move Claudex or change the gateway options,
 the launcher refreshes the profile.
 
-Each bundled route offers **Effort** in Desktop's model picker. The `behavesAs` setting tells
-Desktop to use Claude Sonnet 5's effort controls. Claudex sends requests to the selected GPT
-model and translates the effort through the route's YAML mapping. For custom routes with a
-mapping that includes every level from low through its highest supported level, Desktop caps
-the picker at that level. Routes with gaps in their mapping stay selectable and use Desktop's
-default controls. If the proxy was running when you upgraded, quit Desktop, run `claudex stop`,
-then run `claudex desktop` to refresh the picker.
+Claudex configures Desktop's short model names `opus`, `sonnet`, `haiku`, and `fable` to use
+GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Luna, and GPT-6 Astra, respectively. Use these names for
+workflow agents that should follow a Claude family across versions. Desktop may substitute
+another model for a literal ID outside its list before the request reaches Claudex. When
+Claudex receives a versioned Claude ID, it routes the request to that family's default.
+
+Use the exact ID in this table to select a specific GPT model in a Desktop workflow.
+
+| GPT model | Desktop workflow `model` |
+| --- | --- |
+| GPT-6.1 Sol | `claude-opus-5-5` |
+| GPT-6 Astra | `claude-fable-5-2` |
+| GPT-6.1 Terra | `claude-sonnet-5-5` |
+| GPT-6 Sol | `claudex-sonnet-5` |
+| GPT-6 Luna | `claude-haiku-5-5` |
+| GPT-5.6 Sol | `claudex-opus-5` |
+| GPT-5.6 Terra | `claudex-terra-5-6` |
+| GPT-5.6 Luna | `claudex-luna-5-6` |
+
+Each bundled route offers **Effort** in Desktop's model picker. Claudex translates the selected
+effort through the route's YAML mapping before it sends the request to the GPT model. For a
+custom route whose mapping includes every level from low through its highest supported level,
+Claudex uses `behavesAs` to show Claude Sonnet 5's effort controls and caps the picker at the
+highest mapped level. When the mapping has gaps, Desktop uses its default controls for that
+route. If the proxy was running when you upgraded, quit Desktop, run `claudex stop`, then run
+`claudex desktop` to refresh the picker.
 [Desktop effort configuration](https://claude.com/docs/third-party/claude-desktop/models).
 
 To reopen Desktop, run `claudex desktop`. It reuses the matching proxy when it is running.

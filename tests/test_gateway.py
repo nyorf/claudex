@@ -1,6 +1,7 @@
 import hmac
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -9,8 +10,11 @@ import pytest
 from starlette.types import Message
 
 from claudex.api.gateway import create_gateway
+from claudex.config.launch import plan_launch
+from claudex.config.models import load_model_map
 from claudex.domain.accounts import AccountError
 from claudex.domain.models import ModelRoute
+from claudex.infrastructure.catalog import CatalogModel
 
 type Payload = dict[str, Any]
 _GATEWAY_TOKEN = "synthetic-gateway-secret"
@@ -79,6 +83,60 @@ def _sse_payloads(response: httpx2.Response) -> list[Payload]:
     return [
         json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
     ]
+
+
+async def test_gateway_resolves_family_versions_without_advertising_extra_routes(
+    tmp_path: Path,
+) -> None:
+    model_map = load_model_map(tmp_path / "models.yaml")
+    catalog = {
+        route.model: CatalogModel(route.model, 872_000) for route in model_map.routes.values()
+    }
+    launch = plan_launch(model_map, None, catalog)
+    expected = {
+        "claude-opus-5": "gpt-6.1-sol",
+        "claude-3-opus-20240229": "gpt-6.1-sol",
+        "claude-sonnet-5": "gpt-6.1-terra",
+        "claude-sonnet-4-6": "gpt-6.1-terra",
+        "claude-haiku-4-5-20251001": "gpt-6-luna",
+        "claude-fable-5-2": "gpt-6-astra",
+        "claudex-luna-5-6": "gpt-5.6-luna",
+        "gpt-5.6-terra": "gpt-5.6-terra",
+    }
+    observed: list[str] = []
+
+    def send(request: httpx2.Request) -> httpx2.Response:
+        observed.append(json.loads(request.content)["model"])
+        return _stream(_completed(_text("hello")))
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(send)) as upstream:
+        app = create_gateway(
+            launch.routes,
+            client=upstream,
+            token_provider=Tokens(),
+            gateway_token=_GATEWAY_TOKEN,
+            aliases={
+                **launch.aliases,
+                **{wire: route for route, wire in launch.desktop_models.items()},
+            },
+            families=launch.families,
+        )
+        async with httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url="http://local"
+        ) as client:
+            models = await client.get("/v1/models", headers=_AUTH)
+            assert [item["id"] for item in models.json()["data"]] == list(launch.routes)
+            for model, target in expected.items():
+                response = await client.post(
+                    "/v1/messages", headers=_AUTH, json=_request(model=model)
+                )
+                assert response.status_code == 200
+                assert response.json()["model"] == model
+                assert observed[-1] == target
+            missing = await client.post(
+                "/v1/messages", headers=_AUTH, json=_request(model="claude-sonnet-invalid")
+            )
+            assert missing.status_code == 404
 
 
 async def test_readiness_proves_gateway_identity_without_disclosing_the_token() -> None:

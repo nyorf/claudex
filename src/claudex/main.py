@@ -57,6 +57,7 @@ class _PersistentGateway:
     effort: str
     launch: GatewayLaunch | None = None
     reuse_only: bool = False
+    previous_binding: str | None = field(default=None, repr=False)
 
 
 def _terminate(child: asyncio.subprocess.Process) -> None:
@@ -122,7 +123,9 @@ def _bind(listener: socket.socket, port: int, backlog: int) -> str:
     return f"http://{_LOOPBACK}:{bound_port}"
 
 
-def _gateway_binding(registration_id: str, launch: Launch, effort: str) -> str:
+def _gateway_binding(
+    registration_id: str, launch: Launch, effort: str, *, legacy: bool = False
+) -> str:
     # a stale Claude configuration must fail authentication when routing or context changes
     routes = {
         alias: asdict(replace(route, efforts=dict(route.efforts)))
@@ -135,6 +138,11 @@ def _gateway_binding(registration_id: str, launch: Launch, effort: str) -> str:
         "routes": routes,
         "effort": effort,
     }
+    changed_ids = launch.desktop_models != {alias: alias for alias in launch.routes}
+    if not legacy and (launch.aliases or launch.families or changed_ids):
+        configuration.update(
+            aliases=launch.aliases, families=launch.families, desktop_models=launch.desktop_models
+        )
     canonical = json.dumps(configuration, sort_keys=True, separators=(",", ":"))
     return sha256(canonical.encode()).hexdigest()
 
@@ -153,6 +161,13 @@ async def _local_gateway(
         TemporaryDirectory(prefix="claudex-launch-") as settings_directory,
     ):
         base_url = _bind(listener, port, _BACKLOG)
+        if persistence is not None and persistence.previous_binding is not None:
+            await to_thread.run_sync(
+                persistence.store.migrate_binding,
+                port,
+                persistence.previous_binding,
+                persistence.binding,
+            )
         gateway_token = (
             await to_thread.run_sync(
                 partial(persistence.store.load, reuse_only=persistence.reuse_only),
@@ -168,6 +183,11 @@ async def _local_gateway(
             token_provider=provider,
             gateway_token=gateway_token,
             stop=stop.set if stop is not None else None,
+            aliases={
+                **launch.aliases,
+                **{wire: route for route, wire in launch.desktop_models.items()},
+            },
+            families=launch.families,
         )
         server = _LocalServer(
             uvicorn.Config(
@@ -190,29 +210,31 @@ async def _local_gateway(
             if sys.platform == "win32":
                 await to_thread.run_sync(make_private, settings_path)
             json.dump(launch.settings(base_url, gateway_token, environ=os.environ), file)
+        if persistence is not None:
+            settings = launch.persistent_settings(
+                base_url, gateway_token, persistence.effort, environ=os.environ
+            )
+            await to_thread.run_sync(
+                partial(
+                    persistence.store.publish,
+                    effort_levels={
+                        alias: tuple(route.efforts) for alias, route in launch.routes.items()
+                    },
+                    desktop_models=launch.desktop_models,
+                    desktop_families=launch.desktop_families,
+                ),
+                port,
+                persistence.binding,
+                gateway_token,
+                settings,
+                persistence.launch,
+            )
         gateway = asyncio.create_task(server.serve(sockets=[listener]))
         try:
             try:
                 await _wait_for_start(server, gateway)
             except TimeoutError as exc:
                 raise LaunchError("The local gateway did not start in time.") from exc
-            if persistence is not None:
-                settings = launch.persistent_settings(
-                    base_url, gateway_token, persistence.effort, environ=os.environ
-                )
-                await to_thread.run_sync(
-                    partial(
-                        persistence.store.publish,
-                        effort_levels={
-                            alias: tuple(route.efforts) for alias, route in launch.routes.items()
-                        },
-                    ),
-                    port,
-                    persistence.binding,
-                    gateway_token,
-                    settings,
-                    persistence.launch,
-                )
             yield _LocalGateway(base_url, settings_path, gateway_token, gateway)
         finally:
             server.should_exit = True
@@ -272,7 +294,11 @@ async def serve_gateway(
         if port == 0:
             raise LaunchError("Saved gateway settings require a fixed port.")
         fingerprint = _gateway_binding(binding, launch, selected_effort)
-        if expected_binding is not None and fingerprint != expected_binding:
+        legacy_fingerprint = _gateway_binding(binding, launch, selected_effort, legacy=True)
+        if expected_binding is not None and expected_binding not in (
+            fingerprint,
+            legacy_fingerprint,
+        ):
             raise LaunchError(
                 "The saved profile or routing changed. Start the gateway with claudex serve "
                 "--profile PROFILE, then run claudex configure or claudex desktop again."
@@ -283,6 +309,11 @@ async def serve_gateway(
             effort=selected_effort,
             launch=restart,
             reuse_only=expected_binding is not None,
+            previous_binding=(
+                expected_binding
+                if expected_binding is not None and expected_binding != fingerprint
+                else None
+            ),
         )
     elif any(option is not None for option in (state_dir, binding, restart, expected_binding)):
         raise LaunchError("Saved gateway settings require a state directory and profile binding.")

@@ -6,7 +6,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from claudex.domain.gateway import InvalidMessagesRequestError, UnknownModelError
-from claudex.domain.models import ModelRoute
+from claudex.domain.models import ModelRoute, resolve_route
 
 type Payload = dict[str, Any]
 TOOL_NAMESPACE = "claude_code"
@@ -24,11 +24,17 @@ class InferenceRequest:
     stop_sequences: tuple[str, ...] = ()
 
 
-def prepare_request(body: Payload, routes: Mapping[str, ModelRoute]) -> InferenceRequest:
+def prepare_request(
+    body: Payload,
+    routes: Mapping[str, ModelRoute],
+    aliases: Mapping[str, str] | None = None,
+    families: Mapping[str, str] | None = None,
+) -> InferenceRequest:
     alias = body["model"]
-    route = routes.get(alias)
-    if route is None:
+    target = resolve_route(alias, routes, aliases or {}, families or {})
+    if target is None:
         raise UnknownModelError("Choose a model alias configured for this Claudex launch.")
+    route = routes[target]
     if body.get("context_management") is not None:
         raise InvalidMessagesRequestError("context_management: Extra inputs are not permitted")
     if body.get("mcp_servers") or body.get("container"):

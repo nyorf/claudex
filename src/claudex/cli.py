@@ -7,6 +7,7 @@ from hashlib import sha256
 from hmac import compare_digest
 from importlib.metadata import distribution, version
 from pathlib import Path
+from typing import TypedDict
 
 import httpx2
 from pydantic import ValidationError
@@ -509,13 +510,28 @@ def _desktop_paths(state_dir: Path) -> tuple[Path, Path]:
         raise GatewaySettingsError("Could not resolve the Desktop configuration paths.") from None
 
 
+class _DesktopOptions(TypedDict):
+    effort_levels: dict[str, tuple[str, ...]] | None
+    desktop_models: dict[str, str] | None
+    desktop_families: dict[str, str] | None
+
+
+def _desktop_options(snapshot: GatewaySnapshot) -> _DesktopOptions:
+    return {
+        "effort_levels": snapshot.effort_levels,
+        "desktop_models": snapshot.desktop_models,
+        "desktop_families": snapshot.desktop_families,
+    }
+
+
 def _open_desktop(args: argparse.Namespace, settings: Settings) -> int:
     home, state_dir = _desktop_paths(settings.state_dir)
     port = args.port
     snapshot = _acquire_proxy(args, settings)
     published = snapshot.settings
+    options = _desktop_options(snapshot)
     try:
-        launch_desktop(home, state_dir, port, published, effort_levels=snapshot.effort_levels)
+        launch_desktop(home, state_dir, port, published, **options)
     except DesktopProfileSetupError:
         configure_desktop(
             home,
@@ -523,9 +539,9 @@ def _open_desktop(args: argparse.Namespace, settings: Settings) -> int:
             port,
             published,
             _desktop_helper_command(),
-            effort_levels=snapshot.effort_levels,
+            **options,
         )
-        launch_desktop(home, state_dir, port, published, effort_levels=snapshot.effort_levels)
+        launch_desktop(home, state_dir, port, published, **options)
     print("Opened Claude Desktop for Claudex. Start a session in the Code tab.")
     return 0
 
@@ -566,6 +582,7 @@ def _configure_desktop(state_dir: Path, port: int, *, export: bool) -> int:
     home, state_dir = _desktop_paths(state_dir)
     snapshot = GatewaySettingsStore(state_dir).snapshot(port)
     published = snapshot.settings
+    options = _desktop_options(snapshot)
     result = configure_desktop(
         home,
         state_dir,
@@ -573,14 +590,14 @@ def _configure_desktop(state_dir: Path, port: int, *, export: bool) -> int:
         published,
         _desktop_helper_command(),
         export=export,
-        effort_levels=snapshot.effort_levels,
+        **options,
     )
     if isinstance(result, Path):
         print(result)
         return 0
     port_option = f" --port {port}" if port != DEFAULT_PORT else ""
     try:
-        launch_desktop(home, state_dir, port, published, effort_levels=snapshot.effort_levels)
+        launch_desktop(home, state_dir, port, published, **options)
     except GatewaySettingsError as exc:
         if result:
             raise GatewaySettingsError(
