@@ -17,7 +17,7 @@ saved profiles, model map, and Claude settings. If you configured plain Claude C
 `claudex unconfigure` first to restore its previous settings.
 Stop the proxy before updating or removing the bundle.
 
-On macOS or Linux, run this in your terminal. The command works in Fish 3.4 or later.
+On macOS or Linux, run this in your terminal.
 
 ```sh
 /bin/bash -c "$(curl -fsSL https://github.com/nyorf/claudex/releases/latest/download/install.sh)"

@@ -86,7 +86,6 @@ def _parser() -> argparse.ArgumentParser:
         "--version", action="version", version=f"%(prog)s {version('claudex')} ({_REPOSITORY})"
     )
     commands = parser.add_subparsers(dest="command")
-    commands.add_parser("license", help="Show the Claudex license")
     login = commands.add_parser("login", help="Continue with ChatGPT in your browser")
     login.add_argument("profile")
     for name, help_text in (
@@ -128,6 +127,7 @@ def _parser() -> argparse.ArgumentParser:
         "--export", action="store_true", help="Export a Claude Desktop profile for manual import"
     )
     commands.add_parser("unconfigure", help="Restore Claude Code settings from before Claudex")
+    commands.add_parser("license", help="Show the Claudex license")
     return parser
 
 
