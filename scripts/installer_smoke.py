@@ -76,6 +76,9 @@ def _smoke(archive: Path, workspace: Path, version: str, windows_path: str | Non
         options = ["-NoPath"] if windows_path is None else []
     else:
         environment["HOME"] = str(workspace)
+        environment["SHELL"] = "/bin/bash"
+        environment["XDG_CONFIG_HOME"] = str(workspace / ".config")
+        environment["ZDOTDIR"] = str(workspace)
         install = workspace / ".local" / "opt" / "claudex"
         executable = workspace / ".local" / "bin" / "claudex"
         script = "install.sh"
@@ -83,9 +86,23 @@ def _smoke(archive: Path, workspace: Path, version: str, windows_path: str | Non
         local_arg = "--archive"
         options = []
 
-    installer = [*command, str(ROOT / "scripts" / script), *options]
+    script_path = ROOT / "scripts" / script
+    installer = [*command, str(script_path), *options]
     install_archive = [*installer, local_arg, str(archive)]
-    _run(install_archive, environment, choice="1\n")
+    startup_files: dict[Path, bytes] = {}
+    if os.name == "nt":
+        _run(install_archive, environment, choice="1\n")
+    else:
+        bootstrap = script_path.read_text(encoding="utf-8")
+        bootstrap_install = [*command, "-c", bootstrap, script, local_arg, str(archive)]
+        _run(bootstrap_install, environment, choice="1\n")
+        assert (install / script).read_text(encoding="utf-8").rstrip() == bootstrap.rstrip()
+        startup_files = {
+            path: path.read_bytes() for path in (workspace / ".bashrc", workspace / ".bash_profile")
+        }
+        for path in startup_files:
+            probe = [*command, "-c", '. "$1" && command -v claudex', "bash", str(path)]
+            assert _run(probe, environment).strip() == str(executable)
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
     assert (install / "LICENSE").read_text(encoding="utf-8") == license_text
     assert _run([str(executable), "license"], environment) == license_text
@@ -104,6 +121,7 @@ def _smoke(archive: Path, workspace: Path, version: str, windows_path: str | Non
     assert _run([str(executable), "--version"], environment).strip() == expected_version
     if windows_path is not None:
         _check_windows_path(f"{windows_path};{install}")
+    assert all(path.read_bytes() == contents for path, contents in startup_files.items())
 
     # a failed verification must leave the current installation available
     damaged = workspace / archive.name

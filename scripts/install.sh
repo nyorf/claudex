@@ -15,6 +15,52 @@ script_path="${BASH_SOURCE[0]-}"
 
 fail() { printf 'Claudex installer: %s\n' "$1" >&2; exit 1; }
 
+add_path_line() {
+    local file=$1 line=$2
+    [[ ! -L $file ]] || return 1
+    if [[ -e $file ]]; then
+        [[ -f $file && -w $file ]] || return 1
+        grep -Fqx -- "$line" "$file" && return 0
+    fi
+    mkdir -p "$(dirname "$file")" || return 1
+    printf '\n%s\n' "$line" >> "$file" || return 1
+}
+
+configure_path() {
+    local parent_shell shell line bash_login candidate
+    case ":$PATH:" in
+        *":$bin_dir:"*) return 0 ;;
+    esac
+    parent_shell=$(ps -p "$PPID" -o comm= 2>/dev/null || true)
+    parent_shell=${parent_shell##*/}
+    parent_shell=${parent_shell#-}
+    case "$parent_shell" in
+        bash|zsh|fish|sh) shell=$parent_shell ;;
+        *) shell=${SHELL:-}; shell=${shell##*/} ;;
+    esac
+    line="case \":\$PATH:\" in *\":\$HOME/.local/bin:\"*) ;; *) export PATH=\"\$HOME/.local/bin:\$PATH\" ;; esac"
+    case "$shell" in
+        bash)
+            bash_login=$HOME/.bash_profile
+            for candidate in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+                if [[ -e $candidate || -L $candidate ]]; then
+                    bash_login=$candidate
+                    break
+                fi
+            done
+            add_path_line "$HOME/.bashrc" "$line" && add_path_line "$bash_login" "$line" || return 1
+            ;;
+        zsh) add_path_line "${ZDOTDIR:-$HOME}/.zshrc" "$line" || return 1 ;;
+        sh) add_path_line "$HOME/.profile" "$line" || return 1 ;;
+        fish)
+            line="if not contains -- \"\$HOME/.local/bin\" \$PATH; fish_add_path --path \"\$HOME/.local/bin\"; end"
+            add_path_line "${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish" "$line" || return 1
+            ;;
+        *) return 1 ;;
+    esac
+    printf 'Restart your shell to add %s to your PATH.\n' "$bin_dir"
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --update) [[ -z $choice ]] || fail 'Select update only once.'; choice=2; shift ;;
@@ -29,7 +75,7 @@ done
 
 if [[ -z $choice ]]; then
     printf 'Claudex installer\n\n1) Install\n2) Update\n3) Remove\n0) Exit\n\nChoice: '
-    if [[ -z $script_path || $script_path == main || $script_path == /dev/stdin ]]; then
+    if [[ $script_path == /dev/stdin || ( -z $script_path && -z ${BASH_EXECUTION_STRING:-} ) ]]; then
         [[ -r /dev/tty ]] || fail 'Run this installer in a terminal.'
         IFS= read -r choice < /dev/tty
     else
@@ -156,8 +202,10 @@ reported=$("$stage/claudex/claudex" --version) || fail 'The release executable c
 [[ $reported == "claudex $version" || $reported == "claudex $version ($repository)" ]] || fail 'The release executable did not report the expected version.'
 if [[ -f $script_path ]]; then
     cp "$script_path" "$stage/claudex/install.sh"
+elif [[ -n $archive_arg && ${BASH_EXECUTION_STRING:-} == '#!/usr/bin/env bash'* ]]; then
+    printf '%s' "$BASH_EXECUTION_STRING" > "$stage/claudex/install.sh"
 else
-    curl -fsSL --proto '=https' --proto-redir '=https' "$release_url/install.sh" -o "$stage/claudex/install.sh" || fail 'Could not save the installer for later use.'
+    curl -fsSL --proto '=https' --proto-redir '=https' "${release_url:-$repository/releases/latest/download}/install.sh" -o "$stage/claudex/install.sh" || fail 'Could not save the installer for later use.'
 fi
 printf 'Claudex release installer\n' > "$stage/claudex/.claudex-install"
 if [[ -d $install_dir ]]; then mv "$install_dir" "$backup"; fi
@@ -175,8 +223,7 @@ fi
 committed=true
 if [[ -d $backup ]]; then rm -rf "$backup"; fi
 printf 'Claudex %s is installed.\n' "$version"
-case ":$PATH:" in
-    *":$bin_dir:"*) ;;
-    *) printf 'Add %s to your PATH to run claudex from a terminal.\n' "$bin_dir" ;;
-esac
+if ! configure_path; then
+    printf 'Add %s to your PATH to run claudex from a terminal.\n' "$bin_dir"
+fi
 printf 'To update or remove it later, run bash "%s/install.sh".\n' "$install_dir"

@@ -11,16 +11,25 @@ class Claudex < Formula
   depends_on "rust" => :build
   depends_on "uv" => :build
 
-  conflicts_with "claudex-bin", because: "both install the claudex command"
+  def fetch
+    ENV["UV_CACHE_DIR"] = (buildpath/"uv-cache").to_s
+    ENV["UV_LINK_MODE"] = "copy"
+    ENV["UV_PROJECT_ENVIRONMENT"] = (buildpath/"uv-fetch-env").to_s
+    ENV["UV_PYTHON_DOWNLOADS"] = "never"
+    ENV["OPENSSL_DIR"] = Formula["openssl@3"].opt_prefix.to_s
+    system "uv", "sync", "--locked", "--no-dev", "--no-editable", "--python",
+           Formula["python@3.14"].opt_bin/"python3.14"
+  end
 
   def install
     libexec.install "LICENSE", "README.md", "pyproject.toml", "uv.lock", "src", "man"
     ENV["UV_PROJECT_ENVIRONMENT"] = (libexec/".venv").to_s
     ENV["UV_CACHE_DIR"] = (buildpath/"uv-cache").to_s
+    ENV["UV_LINK_MODE"] = "copy"
     ENV["UV_PYTHON_DOWNLOADS"] = "never"
     ENV["OPENSSL_DIR"] = Formula["openssl@3"].opt_prefix.to_s
     cd libexec do
-      system "uv", "sync", "--locked", "--no-dev", "--no-editable", "--python",
+      system "uv", "sync", "--offline", "--locked", "--no-dev", "--no-editable", "--python",
              Formula["python@3.14"].opt_bin/"python3.14"
     end
     bin.install_symlink libexec/".venv/bin/claudex"
@@ -30,5 +39,7 @@ class Claudex < Formula
   test do
     assert_match "https://github.com/nyorf/claudex", shell_output("#{bin}/claudex --version")
     assert_match "claudex-opus", shell_output("#{bin}/claudex models --example")
+    assert_equal (libexec/"LICENSE").read, shell_output("#{bin}/claudex license")
+    assert_predicate man1/"claudex.1", :file?
   end
 end

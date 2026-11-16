@@ -113,9 +113,112 @@ jobs:
             ${{ env.BUNDLE }}.sha256
           if-no-files-found: error
 
+  bottle:
+    needs: [check, version]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: darwin-arm64
+          - runner: macos-15-intel
+            target: darwin-x86_64
+          - runner: ubuntu-24.04
+            target: linux-x86_64
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: Homebrew/actions/setup-homebrew@d482da0e602890d3160aade42e72c8556103bf04
+        with:
+          core: false
+          cask: false
+      - name: Prepare the formula for this commit
+        shell: bash
+        run: |
+          brew tap-new --no-git nyorf/claudex
+          tap_dir="$(brew --repository nyorf/claudex)"
+          mkdir -p "$tap_dir/Formula"
+          python3 - "$tap_dir/Formula/claudex.rb" <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import sys
+
+          source = Path('Formula/claudex.rb').read_text(encoding='utf-8')
+          source = re.sub(r'\n  bottle do\n(?:    [^\n]*\n)+  end\n', '\n', source, count=1)
+          revision = os.environ['GITHUB_SHA']
+          version = os.environ['RELEASE_VERSION']
+          source, count = re.subn(
+              r'url "https://github.com/nyorf/claudex.git", tag: "v[0-9]+\.[0-9]+\.[0-9]+"(?:, revision: "[0-9a-f]{40}")?',
+              f'url "https://github.com/nyorf/claudex.git", revision: "{revision}"\n'
+              f'  version "{version}"',
+              source,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit('Could not pin the bottle formula to this commit.')
+          Path(sys.argv[1]).write_text(source, encoding='utf-8')
+          PY
+      - name: Build from source and test
+        run: |
+          brew install --build-bottle nyorf/claudex/claudex
+          brew test nyorf/claudex/claudex
+      - name: Bottle and test installation
+        shell: bash
+        run: |
+          mkdir -p bottle-assets
+          cd bottle-assets
+          brew bottle --json --no-rebuild --root-url "https://github.com/nyorf/claudex/releases/download/v$RELEASE_VERSION" nyorf/claudex/claudex
+          bottle=(claudex--*.bottle.tar.gz)
+          test "${#bottle[@]}" -eq 1
+          brew uninstall --ignore-dependencies nyorf/claudex/claudex
+          brew install "./${bottle[0]}"
+          brew test nyorf/claudex/claudex
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: homebrew-bottle-${{ matrix.target }}
+          path: |
+            bottle-assets/*.bottle.tar.gz
+            bottle-assets/*.bottle.json
+          if-no-files-found: error
+
+  homebrew-formula:
+    needs: [version, bottle]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: bottle-assets
+          pattern: homebrew-bottle-*
+          merge-multiple: true
+      - name: Verify bottles and generate formula
+        shell: bash
+        run: |
+          python3 Formula/generate.py bottle-assets "$RELEASE_VERSION" "$GITHUB_SHA" generated-tap/Formula
+          ruby -c generated-tap/Formula/claudex.rb
+          tar -czf bottle-assets/claudex-homebrew-formula.tar.gz -C generated-tap Formula
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: homebrew-release
+          path: |
+            bottle-assets/claudex-homebrew-formula.tar.gz
+            bottle-assets/claudex-${{ needs.version.outputs.version }}.*.bottle.tar.gz
+          if-no-files-found: error
+
   draft-release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [check, version, wheel, bundle]
+    needs: [check, version, wheel, bundle, homebrew-formula]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -156,10 +259,7 @@ jobs:
                   raise SystemExit(f"Invalid checksum for {name}.")
           PY
           cp scripts/install.sh scripts/install.ps1 release-assets/
-          python Formula/generate.py release-assets "$RELEASE_VERSION" "$(git rev-parse HEAD)" generated-tap/Formula
-          ruby -c generated-tap/Formula/claudex.rb
-          ruby -c generated-tap/Formula/claudex-bin.rb
-          tar -czf release-assets/claudex-homebrew-formulae.tar.gz -C generated-tap Formula
+          rm -f release-assets/*--*.bottle.tar.gz release-assets/*.bottle.json
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}

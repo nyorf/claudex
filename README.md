@@ -17,10 +17,10 @@ saved profiles, model map, and Claude settings. If you configured plain Claude C
 `claudex unconfigure` first to restore its previous settings.
 Stop the proxy before updating or removing the bundle.
 
-On macOS or Linux, run this in Bash or Zsh.
+On macOS or Linux, run this in your terminal. The command works in Fish 3.4 or later.
 
 ```sh
-(installer=$(mktemp) && trap 'rm -f "$installer"' EXIT && curl -fsSL https://github.com/nyorf/claudex/releases/latest/download/install.sh -o "$installer" && bash "$installer")
+/bin/bash -c "$(curl -fsSL https://github.com/nyorf/claudex/releases/latest/download/install.sh)"
 ```
 
 On Windows x64, run this in PowerShell.
@@ -29,8 +29,9 @@ On Windows x64, run this in PowerShell.
 $installer = Join-Path ([IO.Path]::GetTempPath()) "claudex-$([guid]::NewGuid()).ps1"; try { Invoke-WebRequest -UseBasicParsing -ErrorAction Stop https://github.com/nyorf/claudex/releases/latest/download/install.ps1 -OutFile $installer; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer } finally { Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue }
 ```
 
-Open a new shell and run `claudex --version`. On macOS and Linux, add `~/.local/bin` to your
-shell's `PATH` if it isn't already there.
+On macOS and Linux, the installer adds `~/.local/bin` to `PATH` for Bash, Zsh, Fish, and sh
+when needed. Open a new shell and run `claudex --version`. To add the directory yourself in
+Fish, run `fish_add_path ~/.local/bin`.
 
 The CLI smoke tests use Claude Code 2.1.316. The native model picker and context
 settings depend on the installed Claude Code version.
@@ -47,18 +48,19 @@ uv tool install --python 3.14 ./claudex-1.0.0-py3-none-any.whl
 
 ## Install with Homebrew
 
-After the tap formulas for a release are in the repository, add the tap and pick one formula.
+Add the tap and install Claudex.
 
 ```sh
 brew tap nyorf/claudex https://github.com/nyorf/claudex.git
-brew install nyorf/claudex/claudex-bin
+brew install nyorf/claudex/claudex
 ```
 
-The `claudex-bin` formula installs the prebuilt bundle. For a source build, use
-`brew install --build-from-source nyorf/claudex/claudex`. Both install `man claudex`.
+Homebrew installs a prebuilt bottle when one matches your system. To build from source, use
+Homebrew 7 or later and run `brew install --build-from-source nyorf/claudex/claudex`.
+Both install `man claudex`.
 Use `brew upgrade` to update a Homebrew installation. Run `claudex desktop` after upgrading
 to refresh the Desktop credential helper if its path changed. See
-[release checks](docs/operations/releasing.md) for how to prepare the tap formulas from a release.
+[release checks](docs/operations/releasing.md) for how to update the tap from a release.
 
 ## Open Claude Code
 

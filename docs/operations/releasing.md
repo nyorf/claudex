@@ -59,16 +59,18 @@ checks the extracted executables and exercises the installers against the built 
 Run **Build release artifacts** manually to build and download the workflow artifacts. To
 prepare a release, push a version tag that matches `pyproject.toml`, such as `v1.0.0`. After
 the checks pass, the workflow creates a draft GitHub release with the bundles, Python
-distributions, SHA-256 checksums, and both installer scripts.
+distributions, SHA-256 checksums, installer scripts, and Homebrew bottles.
 
 Review the draft and complete the release checks before publishing it. The one-line installers
 use the latest published stable release. A draft remains unavailable to them until you publish it.
 See [managing GitHub releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository).
 
-The draft includes `claudex-homebrew-formulae.tar.gz`. Extract it and copy `claudex.rb` and
-`claudex-bin.rb` into `Formula/` in the source repository. Review the source commit and archive
-checksums in the generated files before publishing the tap. After publishing the release and
-pushing the formulas, install each formula separately and run `claudex --version` and `man claudex`.
+The draft includes `claudex-homebrew-formula.tar.gz`. Extract it and replace `Formula/claudex.rb`
+in the tap with the generated file. Check the pinned source commit and bottle checksums. After
+publishing the release and pushing the formula, verify `brew install nyorf/claudex/claudex` on a
+matching bottle platform. In a separate Homebrew installation, use
+`brew install --build-from-source nyorf/claudex/claudex`. Run `claudex license` and `man claudex`
+with each installation.
 
 ## Verify the Desktop Code tab
 
