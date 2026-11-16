@@ -1,9 +1,17 @@
 class Claudex < Formula
   desc "Use ChatGPT models with Claude Code"
   homepage "https://github.com/nyorf/claudex"
-  url "https://github.com/nyorf/claudex.git", tag: "v1.0.0"
+  url "https://github.com/nyorf/claudex.git", tag: "v1.0.0", revision: "0ff6f3072294d6a0938cae145f661428464e1125"
   head "https://github.com/nyorf/claudex.git"
   license "Apache-2.0"
+
+  bottle do
+    root_url "https://github.com/nyorf/claudex/releases/download/v1.0.0"
+    sha256 cellar: :any_skip_relocation, arm64_linux: "0426aa835288fc5d3ec6568677f064a05841a17c5b439a45f24c7c50cbee16f2"
+    sha256 cellar: "/opt/homebrew/Cellar", arm64_sequoia: "5bd90d353fd687f5f99107cb27dd28ba6a710608c0af0534e56339a9885f3b5a"
+    sha256 cellar: :any, sequoia: "f6c07aaa8bfb6d37d318f384d003402dcdc81ce262a2a2fe54bc8889786ae668"
+    sha256 cellar: :any_skip_relocation, x86_64_linux: "18c52b58779fc9ac5d6526181e8afbb084d9685c0f2a6033abdb04549f4c56ac"
+  end
 
   on_macos do
     on_intel do
