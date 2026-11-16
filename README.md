@@ -122,10 +122,15 @@ registration, or `claudex remove personal` to forget the profile.
 
 ## Map models
 
-`claudex models` shows the model-map path, aliases, targets, and effective context windows.
+`claudex models` lists the model-map path and routes, including their active context windows
+when the proxy is running. `claudex models --available` lists the account catalog's defaults.
 `claudex models --example` prints the bundled YAML. Save an edited copy to the model-map path
-or use `claudex cli --proxy-map ./models.yaml`. See [Configuration](docs/configuration.md) for the
-fields and how model switching works.
+or use `claudex cli --proxy-map ./models.yaml`.
+
+For each of the eight bundled models, Claudex uses a window of 872,000 tokens when the selected
+ChatGPT account's catalog reports support. Otherwise it uses the catalog default. You can
+override the window for a model and profile in the YAML. See
+[Configuration](docs/configuration.md#model-map) for overrides and model switching.
 
 The launcher prints the selected profile, GPT model, context window source, and effort.
 In Claude Code, `/model` shows the configured labels and `/context` reports the selected

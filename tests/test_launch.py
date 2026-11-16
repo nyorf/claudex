@@ -170,6 +170,70 @@ def test_default_effort_is_passed_to_claude(tmp_path: Path) -> None:
     assert launch.arguments(tmp_path / "settings.json", None, [])[-2:] == ["--effort", "medium"]
 
 
+def test_bundled_models_use_supported_default_for_compaction(tmp_path: Path) -> None:
+    model_map = load_model_map(tmp_path / "models.yaml")
+    catalog = {
+        route.model: CatalogModel(route.model, route.context_window, 872_000)
+        for route in model_map.routes.values()
+    }
+
+    launch = plan_launch(model_map, None, catalog, profile="work")
+    settings = launch.settings("http://127.0.0.1:8765", "synthetic")
+
+    assert len(launch.routes) == 8
+    assert {route.context_window for route in launch.routes.values()} == {872_000}
+    assert launch.context_source == "Claudex default window"
+    assert settings["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "872000"
+    assert settings["autoCompactEnabled"] is True
+    assert {fields["autoCompactWindow"] for fields in settings["modelSettings"].values()} == {
+        872_000
+    }
+
+
+def test_launch_uses_each_models_supported_window(tmp_path: Path) -> None:
+    model_map = load_model_map(tmp_path / "models.yaml")
+    catalog = {
+        "gpt-6.1-sol": CatalogModel("gpt-6.1-sol", 500_000, 1_000_000),
+        "gpt-6-astra": CatalogModel("gpt-6-astra", 272_000, 500_000),
+        "gpt-6.1-terra": CatalogModel("gpt-6.1-terra", None),
+    }
+    launch = plan_launch(model_map, "opus", catalog, profile="work")
+    settings = launch.settings("http://127.0.0.1:8765", "synthetic")
+
+    assert {name: route.context_window for name, route in launch.routes.items()} == {
+        "claudex-opus": 872_000,
+        "claudex-fable": 272_000,
+        "claudex-sonnet": 500_000,
+    }
+    assert {
+        name: fields["autoCompactWindow"] for name, fields in settings["modelSettings"].items()
+    } == {"claudex-opus": 872_000, "claudex-fable": 272_000, "claudex-sonnet": 500_000}
+
+
+@pytest.mark.parametrize(
+    ("default", "maximum", "expected", "source"),
+    [
+        (272_000, 872_000, 872_000, "Claudex default window"),
+        (None, 872_000, 872_000, "Claudex default window"),
+        (872_000, None, 872_000, "Claudex default window"),
+        (1_000_000, 900_000, 872_000, "Claudex default window"),
+        (272_000, 871_999, 272_000, "ChatGPT model catalog"),
+        (500_000, 272_000, 500_000, "ChatGPT model catalog"),
+        (272_000, None, 272_000, "ChatGPT model catalog"),
+        (None, None, 500_000, "configured window"),
+    ],
+)
+def test_launch_selects_context_from_catalog_evidence(
+    tmp_path: Path, default: int | None, maximum: int | None, expected: int, source: str
+) -> None:
+    model_map = load_model_map(tmp_path / "models.yaml")
+    catalog = {"gpt-6.1-sol": CatalogModel("gpt-6.1-sol", default, maximum)}
+    launch = plan_launch(model_map, None, catalog, profile="personal")
+
+    assert launch.context_window == expected
+    assert launch.context_source == source
+
+
 @pytest.fixture
 def override_map(tmp_path: Path) -> ModelMap:
     path = tmp_path / "models.yaml"
@@ -183,7 +247,7 @@ routes:
     label: Fable
     model: gpt-astra
     context_window: 200000
-    context_window_overrides: {personal: 872000}
+    context_window_overrides: {personal: 700000}
     efforts: {high: high}
 """,
         encoding="utf-8",
@@ -199,18 +263,18 @@ def test_profile_override_applies_to_one_route_and_one_profile(override_map: Mod
     personal = plan_launch(override_map, "claudex-fable", catalog, profile="personal")
     work = plan_launch(override_map, "claudex-fable", catalog, profile="work")
     unspecified = plan_launch(override_map, "claudex-fable", catalog)
-    assert personal.context_window == 872_000
+    assert personal.context_window == 700_000
     assert personal.context_source == "profile override"
     assert personal.routes["claudex-opus"].context_window == 500_000
-    assert work.context_window == unspecified.context_window == 272_000
-    assert work.context_source == "ChatGPT model catalog"
+    assert work.context_window == unspecified.context_window == 872_000
+    assert work.context_source == "Claudex default window"
 
     selected_sol = plan_launch(override_map, None, catalog, profile="personal")
     assert selected_sol.context_window == 500_000
     assert selected_sol.context_source == "configured window"
     settings = selected_sol.settings("http://127.0.0.1:8765", "synthetic")
-    assert settings["modelSettings"]["claudex-fable"]["autoCompactWindow"] == 872_000
-    assert settings["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "872000"
+    assert settings["modelSettings"]["claudex-fable"]["autoCompactWindow"] == 700_000
+    assert settings["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] == "700000"
 
 
 @pytest.mark.parametrize(

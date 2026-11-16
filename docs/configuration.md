@@ -18,30 +18,33 @@ used when you omit `--model`. Configure each route under `routes` with these fie
 | `label` | Name shown in Claude Code alongside the GPT model ID |
 | `aliases` | Additional names accepted by the Claudex launcher |
 | `model` | GPT model slug returned by `claudex models --available` |
-| `context_window` | Declared token window for the model when the account catalog provides no window |
+| `context_window` | Fallback token window when the catalog lacks a default and cannot establish support for 872,000 tokens |
 | `context_window_overrides` | Optional map from saved profile names to verified token windows |
 | `efforts` | Mapping from explicit Claude effort to GPT reasoning effort |
 | `claude_default_effort` | Claude effort selected at launch when you omit `--effort` |
 | `default_effort` | GPT reasoning effort when Claude omits effort |
 
 Use route IDs starting with `claudex-`, such as `claudex-opus`. Put built-in Claude model IDs
-such as `claude-opus-5-5` in the `aliases` field. Use the window verified for the selected
-upstream route and profile. The bundled 500,000-token example comes from the published GPT-6.1
-Sol default in Codex and ChatGPT Work. The direct Sign in with ChatGPT endpoint may have a
-different effective window. By default, Claudex uses the account catalog's reported window.
+such as `claude-opus-5-5` in the `aliases` field.
 
-To use a larger window you have verified for a profile, add a profile-specific override to
-that model's route in your local map. For example, add this under `routes.claudex-fable`
-if Astra supports the larger window on your `personal` profile.
+Claudex selects a context window for each mapped model from the selected ChatGPT account's
+catalog. If either the default or a valid maximum reaches 872,000 tokens, Claudex uses 872,000.
+Otherwise it uses the catalog default. If the catalog gives no default, Claudex falls back to
+`context_window` from the YAML.
+Run `claudex models` while the proxy is running to see the windows in use.
+`claudex models --available` shows the defaults reported by the account catalog.
+
+A profile override takes precedence over automatic selection. To set Astra's window to
+872,000 tokens for `personal`, add the following under `routes.claudex-fable`.
 
 ```yaml
 context_window_overrides:
   personal: 872000
 ```
 
-The override must fit within the maximum reported by that profile's account catalog.
-Claudex reports an error if the maximum is missing or lower than the override. Remove the
-override to use the catalog's default window. If you reuse a profile name for another
+The override must fit within a valid maximum from the profile's catalog. Claudex reports an
+error if the maximum is missing, below the catalog default, or lower than the override. Remove the
+override to let Claudex select the window automatically. If you reuse a profile name for another
 account, verify its window before reusing the override.
 
 The picker lists all mapped routes available to the selected profile. Claudex sets a window
@@ -80,6 +83,13 @@ Use `/status` to check the API base URL in projects with their own provider sett
 `claudex unconfigure` restores the settings Claudex applied and keeps unrelated changes.
 If it reports a conflict, restore the configured value for the named entry before retrying.
 
+If an update changes a model's window and the saved gateway fails to start, stop any running
+proxy and start it with `claudex serve --profile PROFILE`, using your existing profile name.
+Pass your previous `--model`, `--effort`, and `--map` options if you set them.
+For plain `claude`, rerun `claudex configure` with Claude Code closed. For Desktop, quit the app
+and run `claudex desktop` to use the updated settings. Pass the same `--port` to each Claudex
+command if you use a custom port.
+
 With `--effort max`, Claude Code applies max effort across the session. Each selected route
 must have a mapping for that effort.
 
@@ -109,7 +119,7 @@ Desktop remembers a different environment, switch back to **This computer** once
 
 The launcher uses the smallest context window published by the proxy for all local Code
 sessions in that app process. The shared window must be between 100,000 and 1,000,000 tokens.
-If all eight routes support a window of 872,000 tokens, `/context` shows 872k when you switch
+If all eight routes use a window of 872,000 tokens, `/context` shows 872k when you switch
 models. With auto-compaction enabled, Claude Code uses its normal reserve. Quit Desktop before
 running the launcher so the app can pick up the window.
 A regular Dock launch uses Desktop's window for gateway aliases. See

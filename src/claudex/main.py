@@ -270,7 +270,7 @@ async def serve_gateway(
         if expected_binding is not None and fingerprint != expected_binding:
             raise LaunchError(
                 "The saved profile or routing changed. Start the gateway with claudex serve "
-                "and run claudex configure desktop again."
+                "--profile PROFILE, then run claudex configure or claudex desktop again."
             )
         persistence = _PersistentGateway(
             store=GatewaySettingsStore(state_dir),

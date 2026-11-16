@@ -29,6 +29,7 @@ _OTHER_PROVIDER_SWITCHES = (
     "CLAUDE_CODE_USE_MANTLE",
 )
 _FAMILIES = ("opus", "sonnet", "haiku", "fable")
+_PREFERRED_CONTEXT_WINDOW = 872_000
 _MIN_COMPACTION_WINDOW = 100_000
 _MAX_COMPACTION_WINDOW = 1_000_000
 _LAUNCH_OPTIONS = {
@@ -221,6 +222,11 @@ def _context(
     alias: str, route: ModelRoute, model: CatalogModel, override: int | None
 ) -> tuple[int, str]:
     if override is None:
+        if (
+            max(model.context_window or 0, model.max_context_window or 0)
+            >= _PREFERRED_CONTEXT_WINDOW
+        ):
+            return _PREFERRED_CONTEXT_WINDOW, "Claudex default window"
         if model.context_window is not None:
             return model.context_window, "ChatGPT model catalog"
         return route.context_window, "configured window"
