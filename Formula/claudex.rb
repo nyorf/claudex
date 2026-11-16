@@ -1,17 +1,18 @@
 class Claudex < Formula
   desc "Use ChatGPT models with Claude Code"
   homepage "https://github.com/nyorf/claudex"
-  url "https://github.com/nyorf/claudex.git", tag: "v1.0.5", revision: "0aa5cf68435744355b3c26af541dd1cc7165a529"
+  url "https://github.com/nyorf/claudex.git", tag: "v1.0.6", revision: "6c5d9091fc6a9a71c9de15c8943e536219c81ece"
   head "https://github.com/nyorf/claudex.git"
   license "Apache-2.0"
 
   bottle do
-    root_url "https://github.com/nyorf/claudex/releases/download/v1.0.5"
-    sha256 cellar: :any_skip_relocation, arm64_linux: "3e651e8fb2075d5b66a5a866f0a89899828482205fbb432e4bd2c3e15d0195e4"
-    sha256 cellar: "/opt/homebrew/Cellar", arm64_sequoia: "5aea946c15f84c2972f675ece78e06544c006d697aeeeea95f6e6174b480d522"
-    sha256 cellar: :any_skip_relocation, sequoia: "2da9ef8551fc7fe6fd2e49e1d86f559fd01c5d9eb907db7a19a1ff86c6a3c02a"
-    sha256 cellar: :any_skip_relocation, x86_64_linux: "937319b579e2046ddd08a4ef65460c8e4d4fffb1f93e29747d929ea1ddbc9456"
+    root_url "https://github.com/nyorf/claudex/releases/download/v1.0.6"
+    sha256 cellar: :any_skip_relocation, arm64_linux: "56c6e9f78330f422646395438c47dfa6865390a2b0f383d979dc91cf5e755b54"
+    sha256 cellar: "/opt/homebrew/Cellar", arm64_sequoia: "d04bd6a616d2d54088154245a4c2d9febd14d28a6a1617770cfdec6d0acfd818"
+    sha256 cellar: :any_skip_relocation, sequoia: "90671614ff0bf0714f999d57a2a94094a886295488f4760f6680767d1ab24c57"
+    sha256 cellar: :any_skip_relocation, x86_64_linux: "d171388f510250493e3f1a5c77841f5cfad40f6d6a7672ae553ea4a919a0385a"
   end
+
 
 
 
