@@ -223,6 +223,7 @@ jobs:
           bottle=(claudex--*.bottle.tar.gz)
           test "${#bottle[@]}" -eq 1
           brew uninstall --ignore-dependencies nyorf/claudex/claudex
+          brew trust --formula nyorf/claudex/claudex
           brew install "./${bottle[0]}"
           brew test nyorf/claudex/claudex
           if [[ "$TARGET" == darwin-x86_64 ]]; then
