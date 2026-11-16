@@ -60,6 +60,8 @@ Run **Build release artifacts** manually to build and download the workflow arti
 prepare a release, push a version tag that matches `pyproject.toml`, such as `v1.0.0`. After
 the checks pass, the workflow creates a draft GitHub release with the bundles, Python
 distributions, SHA-256 checksums, installer scripts, and Homebrew bottles.
+The Intel macOS bottle packages the standalone bundle built in the same run. It includes
+its Python runtime.
 
 Review the draft and complete the release checks before publishing it. The one-line installers
 use the latest published stable release. A draft remains unavailable to them until you publish it.
@@ -70,7 +72,8 @@ in the tap with the generated file. Check the pinned source commit and bottle ch
 publishing the release and pushing the formula, verify `brew install nyorf/claudex/claudex` on a
 matching bottle platform. In a separate Homebrew installation, use
 `brew install --build-from-source nyorf/claudex/claudex`. Run `claudex license` and `man claudex`
-with each installation.
+with each installation. An Intel macOS source build needs an existing Homebrew toolchain with
+Python 3.14, OpenSSL 3, pkgconf, Rust, and uv. [Homebrew Intel support](https://docs.brew.sh/Support-Tiers#macos-on-intel)
 
 ## Verify the Desktop Code tab
 

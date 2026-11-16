@@ -114,7 +114,7 @@ jobs:
           if-no-files-found: error
 
   bottle:
-    needs: [check, version]
+    needs: [check, version, bundle]
     strategy:
       fail-fast: false
       matrix:
@@ -133,12 +133,28 @@ jobs:
       HOMEBREW_NO_AUTO_UPDATE: '1'
       HOMEBREW_NO_INSTALL_CLEANUP: '1'
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
+      TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: Homebrew/actions/setup-homebrew@d482da0e602890d3160aade42e72c8556103bf04
         with:
           core: false
           cask: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: matrix.target == 'darwin-x86_64'
+        with:
+          name: bundle-darwin-x86_64
+          path: intel-bundle
+      - name: Verify the Intel bundle
+        if: matrix.target == 'darwin-x86_64'
+        shell: bash
+        run: |
+          archive="claudex-$RELEASE_VERSION-darwin-x86_64.tar.gz"
+          cd intel-bundle
+          shasum -a 256 -c "$archive.sha256"
+          mkdir -p "$(brew --cache)"
+          cp "$archive" "$(brew --cache)/claudex-ci-$archive"
+          cmp "$archive" "$(brew --cache)/claudex-ci-$archive"
       - name: Prepare the formula for this commit
         shell: bash
         run: |
@@ -164,11 +180,39 @@ jobs:
           )
           if count != 1:
               raise SystemExit('Could not pin the bottle formula to this commit.')
+          if os.environ['TARGET'] == 'darwin-x86_64':
+              Path(os.environ['RUNNER_TEMP'], 'claudex-public.rb').write_text(source, encoding='utf-8')
+              recipe = '''  def install
+            archive = HOMEBREW_CACHE/"claudex-ci-claudex-#{version}-darwin-x86_64.tar.gz"
+            system "tar", "-xzf", archive
+            libexec.install (buildpath/"claudex").children
+            bin.install_symlink libexec/"claudex"
+            man1.install libexec/"claudex.1"
+          end
+
+          '''
+              source, count = re.subn(r'  on_macos do\n[\s\S]*?(?=  test do\n)', recipe, source, count=1)
+              if count != 1:
+                  raise SystemExit('Could not prepare the Intel bottle formula.')
           Path(sys.argv[1]).write_text(source, encoding='utf-8')
           PY
-      - name: Build from source and test
+      - name: Install the formula and test
+        shell: bash
         run: |
           brew install --build-bottle nyorf/claudex/claudex
+          if [[ "$TARGET" == darwin-x86_64 ]]; then
+            cp "$RUNNER_TEMP/claudex-public.rb" "$(brew --repository nyorf/claudex)/Formula/claudex.rb"
+            cp "$RUNNER_TEMP/claudex-public.rb" "$(brew --prefix nyorf/claudex/claudex)/.brew/claudex.rb"
+            python3 - "$(brew --prefix nyorf/claudex/claudex)/INSTALL_RECEIPT.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding='utf-8') as file:
+              receipt = json.load(file)
+          if receipt.get('runtime_dependencies') != []:
+              raise SystemExit('The Intel bottle has unexpected runtime dependencies.')
+          PY
+          fi
           brew test nyorf/claudex/claudex
       - name: Bottle and test installation
         shell: bash
@@ -181,6 +225,10 @@ jobs:
           brew uninstall --ignore-dependencies nyorf/claudex/claudex
           brew install "./${bottle[0]}"
           brew test nyorf/claudex/claudex
+          if [[ "$TARGET" == darwin-x86_64 ]]; then
+            brew linkage --test nyorf/claudex/claudex
+            env -i HOME="$HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin "$(brew --prefix nyorf/claudex/claudex)/bin/claudex" --version
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: homebrew-bottle-${{ matrix.target }}
