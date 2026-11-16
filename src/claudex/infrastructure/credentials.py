@@ -123,9 +123,9 @@ class _WindowsCredentialBackend:
 
 def _os_keyring() -> CredentialBackend:
     if sys.platform == "darwin":
-        from keyring.backends.macOS import Keyring
+        from claudex.infrastructure.macos_credentials import MacOSCredentialBackend
 
-        return cast(CredentialBackend, Keyring())
+        return MacOSCredentialBackend()
     if sys.platform == "linux":
         from keyring.backends.SecretService import Keyring as SecretService
 
