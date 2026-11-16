@@ -9,9 +9,11 @@ class Claudex < Formula
     root_url "https://github.com/nyorf/claudex/releases/download/v1.0.0"
     sha256 cellar: :any_skip_relocation, arm64_linux: "0426aa835288fc5d3ec6568677f064a05841a17c5b439a45f24c7c50cbee16f2"
     sha256 cellar: "/opt/homebrew/Cellar", arm64_sequoia: "5bd90d353fd687f5f99107cb27dd28ba6a710608c0af0534e56339a9885f3b5a"
-    sha256 cellar: :any, sequoia: "f6c07aaa8bfb6d37d318f384d003402dcdc81ce262a2a2fe54bc8889786ae668"
+    sha256 cellar: :any_skip_relocation, sequoia: "7b85fe29fe41a611f18023bab085c9c75f1a5f02b3473a94cb1792ffae531265"
     sha256 cellar: :any_skip_relocation, x86_64_linux: "18c52b58779fc9ac5d6526181e8afbb084d9685c0f2a6033abdb04549f4c56ac"
   end
+
+  preserve_rpath if OS.mac? && Hardware::CPU.intel?
 
   on_macos do
     on_intel do

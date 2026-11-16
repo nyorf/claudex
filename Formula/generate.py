@@ -44,6 +44,9 @@ def _bottles(assets: Path, version: str) -> dict[str, tuple[str, str]]:
     mac_tags = set(tags) - {"x86_64_linux", "arm64_linux"}
     if len(mac_tags) != 2 or sum(tag.startswith("arm64_") for tag in mac_tags) != 1:
         raise ValueError("One ARM and one Intel macOS bottle tag are required.")
+    intel_tag = next(tag for tag in mac_tags if not tag.startswith("arm64_"))
+    if tags[intel_tag][0].lstrip(":") != "any_skip_relocation":
+        raise ValueError("The Intel macOS bottle must be relocatable without rewriting paths.")
     return tags
 
 
