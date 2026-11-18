@@ -138,7 +138,8 @@ when the proxy is running. `claudex models --available` lists the account catalo
 
 The bundled [`models.yaml`](https://github.com/nyorf/claudex/blob/master/src/claudex/config/models.yaml)
 lists each GPT target, its aliases, its fallback context window, and the GPT reasoning effort
-for each Claude effort level. The `default` route selects GPT-6.1 Sol at medium effort.
+for each Claude effort level. The `default` and `opus` aliases select GPT-6.2 Sol.
+The `fable` alias selects GPT-6.2 Astra. Both routes default to medium effort.
 Run `claudex models --example` to print the map from your installed version. Save an edited
 copy to the model-map path, or save it in the current directory and launch with
 `claudex cli --proxy-map ./models.yaml`.

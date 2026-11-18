@@ -94,12 +94,15 @@ async def test_gateway_resolves_family_versions_without_advertising_extra_routes
     }
     launch = plan_launch(model_map, None, catalog)
     expected = {
-        "claude-opus-5": "gpt-6.1-sol",
-        "claude-3-opus-20240229": "gpt-6.1-sol",
+        "claude-opus-5": "gpt-6.2-sol",
+        "claude-opus-5-5": "gpt-6.2-sol",
+        "claude-3-opus-20240229": "gpt-6.2-sol",
+        "gpt-6.2-sol": "gpt-6.2-sol",
         "claude-sonnet-5": "gpt-6.1-terra",
         "claude-sonnet-4-6": "gpt-6.1-terra",
         "claude-haiku-4-5-20251001": "gpt-6-luna",
-        "claude-fable-5-2": "gpt-6-astra",
+        "claude-fable-5-2": "gpt-6.2-astra",
+        "gpt-6.2-astra": "gpt-6.2-astra",
         "claudex-luna-5-6": "gpt-5.6-luna",
         "gpt-5.6-terra": "gpt-5.6-terra",
     }

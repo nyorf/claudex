@@ -222,6 +222,8 @@ async def _local_gateway(
                     },
                     desktop_models=launch.desktop_models,
                     desktop_families=launch.desktop_families,
+                    route_aliases=launch.aliases,
+                    route_families=launch.families,
                 ),
                 port,
                 persistence.binding,

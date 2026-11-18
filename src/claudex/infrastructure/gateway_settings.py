@@ -73,12 +73,37 @@ class GatewaySnapshot(NamedTuple):
     effort_levels: dict[str, tuple[str, ...]] | None = None
     desktop_models: dict[str, str] | None = None
     desktop_families: dict[str, str] | None = None
+    route_aliases: dict[str, str] | None = None
+    route_families: dict[str, str] | None = None
+
+
+def _route_models(settings: Settings) -> list[str] | None:
+    available = settings.get("availableModels")
+    if (
+        not isinstance(available, list)
+        or not all(isinstance(alias, str) and alias for alias in available)
+        or len(set(available)) != len(available)
+    ):
+        return None
+    picker = settings.get("modelPicker")
+    if picker is None:
+        return available
+    options = picker.get("options") if isinstance(picker, dict) else None
+    if not isinstance(options, list):
+        return None
+    routes: list[str] = []
+    for option in options:
+        route = option.get("model") if isinstance(option, dict) else None
+        if not isinstance(route, str) or route not in available or route in routes:
+            return None
+        routes.append(route)
+    return [route for route in available if route in routes]
 
 
 def _desktop_mapping(
     settings: Settings, models: object, families: object
 ) -> tuple[dict[str, str], dict[str, str]]:
-    available = settings.get("availableModels")
+    available = _route_models(settings)
     invalid = "Saved Desktop model mappings are invalid. Run claudex serve again."
     if (
         not isinstance(available, list)
@@ -99,8 +124,31 @@ def _desktop_mapping(
     return dict(models), dict(families)
 
 
+def _route_mapping(
+    settings: Settings, aliases: object, families: object
+) -> tuple[dict[str, str], dict[str, str]]:
+    available = _route_models(settings)
+    invalid = "Saved gateway model mappings are invalid. Run claudex serve again."
+    if (
+        available is None
+        or not isinstance(aliases, dict)
+        or not all(
+            isinstance(alias, str)
+            and re.fullmatch(r"[A-Za-z0-9._-]{1,128}", alias)
+            and isinstance(target, str)
+            and target in available
+            for alias, target in aliases.items()
+        )
+        or not isinstance(families, dict)
+        or not set(families).issubset({"opus", "sonnet", "haiku", "fable"})
+        or not all(isinstance(target, str) and target in available for target in families.values())
+    ):
+        raise GatewaySettingsError(invalid)
+    return dict(aliases), dict(families)
+
+
 def _effort_levels(value: object, settings: Settings) -> dict[str, tuple[str, ...]]:
-    available = settings.get("availableModels")
+    available = _route_models(settings)
     invalid = "Saved gateway effort levels are invalid. Run claudex serve again."
     if (
         not isinstance(available, list)
@@ -306,6 +354,8 @@ class GatewaySettingsStore:
         effort_levels: dict[str, tuple[str, ...]] | None = None,
         desktop_models: dict[str, str] | None = None,
         desktop_families: dict[str, str] | None = None,
+        route_aliases: dict[str, str] | None = None,
+        route_families: dict[str, str] | None = None,
     ) -> None:
         path = self._directory / _port_filename(port)
         with _locked(self._directory, "gateway.lock", private=True):
@@ -330,6 +380,13 @@ class GatewaySettingsStore:
                 models, families = _desktop_mapping(settings, desktop_models, desktop_families)
                 update["desktop_models"] = models
                 update["desktop_families"] = families
+            if route_aliases is None and route_families is None:
+                update.pop("route_aliases", None)
+                update.pop("route_families", None)
+            else:
+                aliases, families = _route_mapping(settings, route_aliases, route_families)
+                update["route_aliases"] = aliases
+                update["route_families"] = families
             if launch is not None:
                 update["launch"] = launch.record()
             _write(path, update)
@@ -370,7 +427,12 @@ class GatewaySettingsStore:
                 if "desktop_models" in record or "desktop_families" in record
                 else (None, None)
             )
-            return GatewaySnapshot(settings, binding, launch, efforts, *desktop)
+            routes = (
+                _route_mapping(settings, record.get("route_aliases"), record.get("route_families"))
+                if "route_aliases" in record or "route_families" in record
+                else (None, None)
+            )
+            return GatewaySnapshot(settings, binding, launch, efforts, *desktop, *routes)
 
 
 def _record_token(record: Settings) -> str:

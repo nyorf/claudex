@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from claudex.config.models import ModelConfigError, ModelMap
-from claudex.domain.models import ModelRoute, model_family
+from claudex.domain.models import ModelRoute, model_family, resolve_route
 from claudex.infrastructure.catalog import CatalogModel
 
 _PROVIDER_ENV = (
@@ -194,12 +194,32 @@ class Launch:
             if route.claude_default_effort != "max":
                 row["effortLevel"] = route.claude_default_effort
             settings[model] = row
+        full_ids = {
+            alias
+            for alias in self.aliases
+            if alias.startswith("claude-")
+            or (model_family(alias) is not None and alias.lower() not in _FAMILIES)
+        }
+        full_ids.update(_DESKTOP_FAMILY_MODELS[family] for family in self.families)
+        for model in full_ids:
+            target = resolve_route(model, self.routes, self.aliases, self.families)
+            if target is not None:
+                window = _compaction_window(model, self.routes[target].context_window, maximum)
+                if isinstance(window, int):
+                    settings[model] = {"autoCompactWindow": window}
         return settings
 
     def settings(
         self, base_url: str, token: str, *, environ: Mapping[str, str] | None = None
     ) -> dict[str, Any]:
         no_proxy = _no_proxy(environ or {})
+        family_prefixes = [f"claude-{family}" for family in self.families]
+        claude_aliases = [
+            alias
+            for alias in self.aliases
+            if alias.startswith("claude-")
+            and not any(alias.startswith(prefix) for prefix in family_prefixes)
+        ]
         return {
             "modelPicker": {
                 "replaceBuiltInOptions": True,
@@ -211,7 +231,9 @@ class Launch:
             "fallbackModel": [],
             "autoCompactEnabled": True,
             "modelSettings": self._model_settings(),
-            "availableModels": list(self.routes),
+            "availableModels": list(
+                dict.fromkeys((*self.routes, *family_prefixes, *claude_aliases))
+            ),
             "enforceAvailableModels": True,
             "env": {
                 **self._session_env(base_url),

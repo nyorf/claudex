@@ -20,6 +20,7 @@ from claudex.infrastructure.gateway_settings import (
     _open_regular,
     _port_filename,
     _read,
+    _route_models,
     _write,
 )
 
@@ -142,7 +143,7 @@ def launch_desktop(
 
 def _desktop_window(settings: Settings) -> int:
     invalid = "Desktop context settings are incomplete or invalid. Restart the Claudex gateway."
-    available = settings.get("availableModels")
+    available = _route_models(settings)
     models = settings.get("modelSettings")
     if not isinstance(available, list) or not available or not isinstance(models, dict):
         raise GatewaySettingsError(invalid)
@@ -178,7 +179,7 @@ def _desktop_models(
     model_ids: Mapping[str, str] | None = None,
     families: Mapping[str, str] | None = None,
 ) -> list[Settings]:
-    available = settings.get("availableModels")
+    available = _route_models(settings)
     picker = settings.get("modelPicker")
     options = picker.get("options") if isinstance(picker, dict) else None
     incomplete = "The gateway model list is incomplete. Restart the Claudex gateway."

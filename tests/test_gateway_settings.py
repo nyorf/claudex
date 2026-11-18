@@ -140,6 +140,51 @@ def test_desktop_mappings_round_trip_and_reject_corrupt_records(tmp_path: Path) 
         store.snapshot(8765)
 
 
+def test_gateway_route_mappings_round_trip_and_reject_corrupt_records(tmp_path: Path) -> None:
+    store = GatewaySettingsStore(tmp_path)
+    token = store.load(8765, "binding-a")
+    settings = {**_settings(8765, token), "availableModels": ["claudex-opus", "claudex-sonnet"]}
+    aliases = {"claude-sonnet-4-6": "claudex-opus"}
+    families = {"sonnet": "claudex-sonnet"}
+    store.publish(
+        8765, "binding-a", token, settings, route_aliases=aliases, route_families=families
+    )
+    assert store.snapshot(8765).route_aliases == aliases
+    assert store.snapshot(8765).route_families == families
+    path = tmp_path / "gateways" / "8765.json"
+    record = _read(path)
+    record["route_families"]["sonnet"] = "unavailable"
+    path.write_text(json.dumps(record))
+    with pytest.raises(GatewaySettingsError, match="gateway model mappings are invalid"):
+        store.snapshot(8765)
+
+
+def test_expanded_cli_allowlist_preserves_desktop_and_effort_metadata(tmp_path: Path) -> None:
+    store = GatewaySettingsStore(tmp_path)
+    token = store.load(8765, "binding-a")
+    settings = {
+        **_settings(8765, token),
+        "availableModels": ["claudex-opus", "claudex-sonnet", "claude-opus", "claude-sonnet"],
+        "modelPicker": {"options": [{"model": "claudex-opus"}, {"model": "claudex-sonnet"}]},
+    }
+    levels = {"claudex-opus": ("high",), "claudex-sonnet": ("low", "high")}
+    models = {"claudex-opus": "claude-opus-5-5", "claudex-sonnet": "claude-sonnet-5-5"}
+    families = {"opus": "claudex-opus", "sonnet": "claudex-sonnet"}
+    store.publish(
+        8765,
+        "binding-a",
+        token,
+        settings,
+        effort_levels=levels,
+        desktop_models=models,
+        desktop_families=families,
+    )
+    snapshot = store.snapshot(8765)
+    assert snapshot.effort_levels == levels
+    assert snapshot.desktop_models == models
+    assert snapshot.desktop_families == families
+
+
 async def test_saved_gateway_migrates_previous_binding_without_changing_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

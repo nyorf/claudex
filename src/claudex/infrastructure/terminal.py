@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from claudex.config.launch import gateway_environment
+from claudex.domain.models import model_family, resolve_route
 from claudex.infrastructure.gateway_settings import GatewaySettingsError, GatewaySnapshot
 
 _EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
@@ -68,6 +69,39 @@ def _arguments(model: str, effort: str, settings: Path, args: list[str]) -> list
     return [*defaults, *args]
 
 
+def _mapped_models(snapshot: GatewaySnapshot, args: list[str]) -> list[str]:
+    aliases, families = snapshot.route_aliases, snapshot.route_families
+    visible = args[: args.index("--")] if "--" in args else args
+    if (
+        aliases is None
+        or families is None
+        or any(arg.split("=", 1)[0] == "--settings" for arg in visible)
+    ):
+        return args
+    routes = dict.fromkeys((*aliases.values(), *families.values()))
+    result = args.copy()
+    for index, arg in enumerate(visible):
+        if arg.startswith("--model="):
+            name = arg.removeprefix("--model=")
+            prefix = "--model="
+            position = index
+        elif arg == "--model" and index + 1 < len(visible):
+            name = visible[index + 1]
+            prefix = ""
+            position = index + 1
+        else:
+            continue
+        family = model_family(name)
+        if name.lower() in ("opus", "sonnet", "haiku", "fable"):
+            continue
+        if family is None and not name.startswith("claude-"):
+            continue
+        target = resolve_route(name, routes, aliases, families)
+        if target is not None:
+            result[position] = prefix + target
+    return result
+
+
 def launch_terminal(claude_bin: str, snapshot: GatewaySnapshot, args: list[str]) -> int:
     model, effort, settings_env = _selection(snapshot)
     env = gateway_environment(os.environ, settings_env)
@@ -76,7 +110,7 @@ def launch_terminal(claude_bin: str, snapshot: GatewaySnapshot, args: list[str])
     settings["env"]["no_proxy"] = env["no_proxy"]
     with TemporaryDirectory(prefix="claudex-cli-") as temporary:
         settings_path = _write_settings(Path(temporary), settings)
-        arguments = _arguments(model, effort, settings_path, args)
+        arguments = _arguments(model, effort, settings_path, _mapped_models(snapshot, args))
         return launch_native(claude_bin, arguments, env=env)
 
 

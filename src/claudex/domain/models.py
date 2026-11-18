@@ -32,7 +32,7 @@ def model_family(name: str) -> str | None:
 
 def resolve_route(
     name: str,
-    routes: Mapping[str, ModelRoute],
+    routes: Mapping[str, object],
     aliases: Mapping[str, str],
     families: Mapping[str, str],
 ) -> str | None:

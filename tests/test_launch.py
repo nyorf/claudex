@@ -17,7 +17,7 @@ routes:
   claudex-opus:
     label: Opus 5.5
     model: gpt-sol
-    aliases: [opus, claude-opus-5-5]
+    aliases: [opus, claude-opus-5-5, claude-3-opus-20240229]
     context_window: 500000
     efforts: {high: xhigh}
   claudex-sonnet:
@@ -71,6 +71,15 @@ routes:
     assert env["DISABLE_COMPACT"] == "0"
     flags = launch.arguments(tmp_path / "settings.json", "high", ["-p", "sample"])
     settings = launch.settings(url, "local-token")
+    assert settings["availableModels"] == [
+        "claudex-opus",
+        "claudex-sonnet",
+        "claudex-haiku",
+        "claude-opus",
+        "claude-sonnet",
+        "claude-haiku",
+        "claude-3-opus-20240229",
+    ]
     assert settings["modelPicker"]["options"][0] == {
         "model": "claudex-opus",
         "label": "Opus 5.5 (gpt-sol)",
@@ -82,6 +91,10 @@ routes:
         "claudex-opus": {"effortLevel": "high", "autoCompactWindow": 475_000},
         "claudex-sonnet": {"effortLevel": "high", "autoCompactWindow": 475_000},
         "claudex-haiku": {"effortLevel": "high", "autoCompactWindow": 200_000},
+        "claude-opus-5-5": {"autoCompactWindow": 475_000},
+        "claude-3-opus-20240229": {"autoCompactWindow": 475_000},
+        "claude-sonnet-5-5": {"autoCompactWindow": 475_000},
+        "claude-haiku-5-5": {"autoCompactWindow": 200_000},
     }
     assert "--autocompact" not in flags
     assert "local-token" not in " ".join(flags)
@@ -131,7 +144,7 @@ routes:
 
 def test_invalid_alias_or_effort_fails_before_launch(tmp_path: Path) -> None:
     model_map = load_model_map(tmp_path / "models.yaml")
-    catalog = {"gpt-6.1-sol": CatalogModel("gpt-6.1-sol", None)}
+    catalog = {"gpt-6.2-sol": CatalogModel("gpt-6.2-sol", None)}
     with pytest.raises(ModelConfigError, match="Unknown model"):
         plan_launch(model_map, "missing", catalog)
     launch = plan_launch(model_map, "opus", catalog)
@@ -144,6 +157,9 @@ def test_invalid_alias_or_effort_fails_before_launch(tmp_path: Path) -> None:
 
 def test_family_versions_use_the_primary_route_and_gpt_ids_keep_their_route(tmp_path: Path) -> None:
     model_map = load_model_map(tmp_path / "models.yaml")
+    assert model_map.resolve(None) == "claudex-opus"
+    assert model_map.routes["claudex-opus"].model == "gpt-6.2-sol"
+    assert model_map.routes["claudex-fable"].model == "gpt-6.2-astra"
     for name, expected in {
         "claude-opus-5": "claudex-opus",
         "claude-3-opus-20240229": "claudex-opus",
@@ -154,6 +170,8 @@ def test_family_versions_use_the_primary_route_and_gpt_ids_keep_their_route(tmp_
         "apac.anthropic.claude-3-5-haiku-20241022-v1:0": "claudex-haiku",
         "jp.anthropic.claude-opus-5-5[1m]": "claudex-opus",
         "claude-fable-5-2": "claudex-fable",
+        "gpt-6.2-sol": "claudex-opus",
+        "gpt-6.2-astra": "claudex-fable",
         "gpt-5.6-sol": "claudex-opus-5",
         "gpt-5.6-terra": "claudex-sonnet-4-6",
         "gpt-5.6-luna": "claudex-haiku-4-5",
@@ -242,7 +260,12 @@ routes:
     unpinned = load_model_map(path)
     assert unpinned.resolve("claude-sonnet-4-6") == "claudex-alternate"
     catalog = {"gpt-alternate": CatalogModel("gpt-alternate", 200_000)}
-    assert plan_launch(unpinned, None, catalog).aliases["claude-sonnet-4-6"] == "claudex-alternate"
+    launch = plan_launch(unpinned, None, catalog)
+    assert launch.aliases["claude-sonnet-4-6"] == "claudex-alternate"
+    assert launch.settings("http://127.0.0.1:8765", "synthetic")["availableModels"] == [
+        "claudex-alternate",
+        "claude-sonnet-4-6",
+    ]
     path.write_text(
         path.read_text()
         + """
@@ -258,6 +281,9 @@ routes:
     launch = plan_launch(pinned, None, catalog)
     assert "sonnet" not in launch.families
     assert "claude-sonnet-4-6" not in launch.aliases
+    assert launch.settings("http://127.0.0.1:8765", "synthetic")["availableModels"] == [
+        "claudex-alternate"
+    ]
 
 
 def test_shared_family_pins_have_one_deterministic_desktop_family(tmp_path: Path) -> None:
@@ -305,7 +331,7 @@ def test_default_effort_is_passed_to_claude(tmp_path: Path) -> None:
     launch = plan_launch(
         load_model_map(tmp_path / "models.yaml"),
         "opus",
-        {"gpt-6.1-sol": CatalogModel("gpt-6.1-sol", None)},
+        {"gpt-6.2-sol": CatalogModel("gpt-6.2-sol", None)},
     )
     assert launch.arguments(tmp_path / "settings.json", None, [])[-2:] == ["--effort", "medium"]
 
@@ -333,8 +359,8 @@ def test_bundled_models_use_supported_default_for_compaction(tmp_path: Path) -> 
 def test_launch_uses_each_models_supported_window(tmp_path: Path) -> None:
     model_map = load_model_map(tmp_path / "models.yaml")
     catalog = {
-        "gpt-6.1-sol": CatalogModel("gpt-6.1-sol", 500_000, 1_000_000),
-        "gpt-6-astra": CatalogModel("gpt-6-astra", 272_000, 500_000),
+        "gpt-6.2-sol": CatalogModel("gpt-6.2-sol", 500_000, 1_000_000),
+        "gpt-6.2-astra": CatalogModel("gpt-6.2-astra", 272_000, 500_000),
         "gpt-6.1-terra": CatalogModel("gpt-6.1-terra", None),
     }
     launch = plan_launch(model_map, "opus", catalog, profile="work")
@@ -346,8 +372,11 @@ def test_launch_uses_each_models_supported_window(tmp_path: Path) -> None:
         "claudex-sonnet": 500_000,
     }
     assert {
-        name: fields["autoCompactWindow"] for name, fields in settings["modelSettings"].items()
+        name: settings["modelSettings"][name]["autoCompactWindow"] for name in launch.routes
     } == {"claudex-opus": 872_000, "claudex-fable": 272_000, "claudex-sonnet": 500_000}
+    assert settings["modelSettings"]["claude-opus-5-5"]["autoCompactWindow"] == 872_000
+    assert settings["modelSettings"]["claude-fable-5-2"]["autoCompactWindow"] == 272_000
+    assert settings["modelSettings"]["claude-sonnet-5-5"]["autoCompactWindow"] == 500_000
 
 
 @pytest.mark.parametrize(
@@ -367,7 +396,7 @@ def test_launch_selects_context_from_catalog_evidence(
     tmp_path: Path, default: int | None, maximum: int | None, expected: int, source: str
 ) -> None:
     model_map = load_model_map(tmp_path / "models.yaml")
-    catalog = {"gpt-6.1-sol": CatalogModel("gpt-6.1-sol", default, maximum)}
+    catalog = {"gpt-6.2-sol": CatalogModel("gpt-6.2-sol", default, maximum)}
     launch = plan_launch(model_map, None, catalog, profile="personal")
 
     assert launch.context_window == expected

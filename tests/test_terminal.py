@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from claudex import cli
 from claudex.config.launch import Launch
 from claudex.domain.models import ModelRoute
 from claudex.infrastructure.gateway_settings import GatewaySettingsError, GatewaySnapshot
@@ -107,3 +108,56 @@ def test_terminal_forwards_native_arguments(
 def test_terminal_rejects_invalid_saved_settings(invalid: dict[str, Any]) -> None:
     with pytest.raises(GatewaySettingsError, match="settings are invalid"):
         launch_terminal("not-a-command", GatewaySnapshot(invalid, "binding", None), [])
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        (["--model", "claude-sonnet-4-6"], ["--model", "claudex-sonnet"]),
+        (["--model=claude-opus-5-5"], ["--model=claudex-opus"]),
+        (["--model", "us.anthropic.claude-sonnet-5-5[1m]"], ["--model", "claudex-sonnet"]),
+        (["--model", "claude-custom"], ["--model", "claudex-opus"]),
+        (["--model", "sonnet"], ["--model", "sonnet"]),
+        (["--model", "claude-unknown"], ["--model", "claude-unknown"]),
+        (["--", "--model", "claude-opus-5-5"], ["--", "--model", "claude-opus-5-5"]),
+        (
+            ["--settings={}", "--model", "claude-opus-5-5"],
+            ["--settings={}", "--model", "claude-opus-5-5"],
+        ),
+    ],
+)
+def test_terminal_maps_full_ids_using_the_running_gateway(
+    monkeypatch: pytest.MonkeyPatch, arguments: list[str], expected: list[str]
+) -> None:
+    captured: list[str] = []
+
+    def run(command: list[str], **_kwargs: Any) -> Any:
+        nonlocal captured
+        captured = command[1:]
+        return type("Result", (), {"returncode": 0})()
+
+    snapshot = _snapshot()._replace(
+        route_aliases={"claude-sonnet-4-6": "claudex-opus", "claude-custom": "claudex-opus"},
+        route_families={"opus": "claudex-opus", "sonnet": "claudex-sonnet"},
+    )
+    monkeypatch.setattr("claudex.infrastructure.terminal.subprocess.run", run)
+    assert launch_terminal("claude", snapshot, arguments) == 0
+    assert captured[-len(expected) :] == expected
+
+
+def test_cli_entry_point_selects_the_mapped_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[str] = []
+
+    def run(command: list[str], **_kwargs: Any) -> Any:
+        nonlocal captured
+        captured = command[1:]
+        return type("Result", (), {"returncode": 0})()
+
+    snapshot = _snapshot()._replace(route_aliases={}, route_families={"opus": "claudex-opus"})
+    monkeypatch.setattr(cli, "_acquire_proxy", lambda *_args: snapshot)
+    monkeypatch.setattr("claudex.infrastructure.terminal.subprocess.run", run)
+    monkeypatch.setattr(
+        sys, "argv", ["claudex", "cli", "--proxy-port", "8765", "--model", "claude-opus-5-5"]
+    )
+    assert cli.main() == 0
+    assert captured[-2:] == ["--model", "claudex-opus"]

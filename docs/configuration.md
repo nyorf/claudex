@@ -28,7 +28,7 @@ approve the prompt. If the `login` keychain is locked, unlock it in Keychain Acc
 
 ## Model map
 
-Select `--model gpt-6.1-sol` to use the GPT name or `--model opus` to use the bundled
+Select `--model gpt-6.2-sol` to use the GPT name or `--model opus` to use the bundled
 Opus alias. Both select the same GPT model with the bundled map.
 
 Run `claudex models --example` to print the bundled map. The `default` field names the route
@@ -47,6 +47,9 @@ used when you omit `--model`. Configure each route under `routes` with these fie
 
 Use route IDs starting with `claudex-`, such as `claudex-opus`. Put built-in Claude model IDs
 such as `claude-opus-5-5` in the `aliases` field.
+
+Saved YAML maps take precedence over the bundled map. To adopt a new bundled GPT target in a
+custom map, copy the route's `model`, `label`, and GPT-name alias from `claudex models --example`.
 
 Claudex selects a context window for each mapped model from the selected ChatGPT account's
 catalog. If either the default or a valid maximum reaches 872,000 tokens, Claudex uses 872,000.
@@ -76,6 +79,17 @@ For a conversation already beyond the next model's window, run `/compact` before
 For `opus`, `sonnet`, `haiku`, and `fable`, the launcher uses the corresponding
 `claudex-` route when it is available in the launch.
 
+Use `claudex cli --model claude-fable-5-2` to start a session with the mapped model and context
+window. The launcher resolves the full Claude ID to its mapped route before Claude Code opens.
+`/context` and automatic compaction follow that route's window.
+
+You can also use full IDs in a CLI workflow's `model` field or with
+`claude --model claude-fable-5-2` through the configured gateway. For older IDs with the
+version before the family name, add the full ID to the route's `aliases` list. For configured
+full IDs, Claude Code uses the mapped window up to its built-in limit for that ID. Use a short
+name or the mapped route ID in workflows to use the full mapped window on any supported
+Claude Code version.
+
 ## Standalone gateway
 
 `claudex serve` starts a background proxy on `127.0.0.1:8765`. Use `--foreground` to run it
@@ -84,7 +98,7 @@ profile, and the default profile for new launches. Use the same `--port` for a c
 Only one proxy can run at a time for a given Claudex state directory.
 `claudex cli` uses `--proxy-port` for this option because it sends native Claude flags to Claude.
 Without `--model`, it uses the YAML model map's `default` route. Without `--effort`, it uses
-that route's `claude_default_effort`. The bundled map defaults to GPT-6.1 Sol at medium effort.
+that route's `claude_default_effort`. The bundled map defaults to GPT-6.2 Sol at medium effort.
 If this port has saved launch options and they match the default profile, Claudex reuses them.
 Pass an explicit profile or route option to change them after stopping the proxy. Use
 `claudex serve --foreground --saved` to diagnose startup with the same launch options.
@@ -104,8 +118,8 @@ Use `/status` to check the API base URL in projects with their own provider sett
 `claudex unconfigure` restores the settings Claudex applied and keeps unrelated changes.
 If it reports a conflict, restore the configured value for the named entry before retrying.
 
-If an update changes a model's window and the saved gateway fails to start, stop any running
-proxy and start it with `claudex serve --profile PROFILE`, using your existing profile name.
+When an update changes a route or context window, stop the running proxy and start it with
+`claudex serve --profile PROFILE`, using your existing profile name.
 Pass your previous `--model`, `--effort`, and `--map` options if you set them.
 For plain `claude`, rerun `claudex configure` with Claude Code closed. For Desktop, quit the app
 and run `claudex desktop` to use the updated settings. Pass the same `--port` to each Claudex
@@ -132,7 +146,7 @@ helper to read the saved gateway credential. If you move Claudex or change the g
 the launcher refreshes the profile.
 
 Claudex configures Desktop's short model names `opus`, `sonnet`, `haiku`, and `fable` to use
-GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Luna, and GPT-6 Astra, respectively. Use these names for
+GPT-6.2 Sol, GPT-6.1 Terra, GPT-6 Luna, and GPT-6.2 Astra, respectively. Use these names for
 workflow agents that should follow a Claude family across versions. Desktop may substitute
 another model for a literal ID outside its list before the request reaches Claudex. When
 Claudex receives a versioned Claude ID, it routes the request to that family's default.
@@ -141,8 +155,8 @@ Use the exact ID in this table to select a specific GPT model in a Desktop workf
 
 | GPT model | Desktop workflow `model` |
 | --- | --- |
-| GPT-6.1 Sol | `claude-opus-5-5` |
-| GPT-6 Astra | `claude-fable-5-2` |
+| GPT-6.2 Sol | `claude-opus-5-5` |
+| GPT-6.2 Astra | `claude-fable-5-2` |
 | GPT-6.1 Terra | `claude-sonnet-5-5` |
 | GPT-6 Sol | `claudex-sonnet-5` |
 | GPT-6 Luna | `claude-haiku-5-5` |
@@ -155,8 +169,8 @@ effort through the route's YAML mapping before it sends the request to the GPT m
 custom route whose mapping includes every level from low through its highest supported level,
 Claudex uses `behavesAs` to show Claude Sonnet 5's effort controls and caps the picker at the
 highest mapped level. When the mapping has gaps, Desktop uses its default controls for that
-route. If the proxy was running when you upgraded, quit Desktop, run `claudex stop`, then run
-`claudex desktop` to refresh the picker.
+route. After an update that changes routes, quit Desktop and follow the
+[standalone gateway restart steps](#standalone-gateway) to refresh the picker.
 [Desktop effort configuration](https://claude.com/docs/third-party/claude-desktop/models).
 
 To reopen Desktop, run `claudex desktop`. It reuses the matching proxy when it is running.
