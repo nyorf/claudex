@@ -46,17 +46,17 @@ def prepare_request(
     messages = _messages(body["messages"], tools)
     if not messages:
         raise InvalidMessagesRequestError("Send at least one text, image, or tool result message.")
-    payload: Payload = {"model": route.model, "input": messages, "stream": True, "store": False}
     instructions = _instructions(body.get("system"))
     if instructions:
-        payload["instructions"] = instructions
+        messages.insert(0, _message("system", [{"type": "input_text", "text": instructions}]))
+    payload: Payload = {"model": route.model, "input": messages, "stream": True, "store": False}
     if tools:
         payload["tools"] = [
             {
                 "type": "namespace",
                 "name": TOOL_NAMESPACE,
                 "description": "Tools executed by the local Claude Code session.",
-                "tools": list(tools.values()),
+                "tools": [tools[name] for name in sorted(tools)],
             }
         ]
     payload.update(_tool_choice(body.get("tool_choice"), tools))

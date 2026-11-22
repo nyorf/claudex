@@ -3,6 +3,7 @@ import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import anyio
 import httpx2
@@ -227,7 +228,10 @@ async def test_stream_maps_text_effort_image_and_usage() -> None:
 
     body = _request(
         stream=True,
-        system=[{"type": "text", "text": "Act as the coding assistant.", "cache_control": {}}],
+        system=[
+            {"type": "text", "text": "Act as the coding assistant.", "cache_control": {}},
+            {"type": "text", "text": "Preserve the project conventions."},
+        ],
         messages=[
             {"role": "user", "content": "One"},
             {"role": "assistant", "content": "The previous answer."},
@@ -260,9 +264,18 @@ async def test_stream_maps_text_effort_image_and_usage() -> None:
         "model": "gpt-test",
         "stream": True,
         "store": False,
-        "instructions": "Act as the coding assistant.",
         "reasoning": {"effort": "high"},
         "input": [
+            {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "Act as the coding assistant.\n\nPreserve the project conventions.",
+                    }
+                ],
+            },
             {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "One"}]},
             {"role": "assistant", "content": "The previous answer."},
             {
@@ -298,6 +311,100 @@ async def test_stream_maps_text_effort_image_and_usage() -> None:
         "cache_read_input_tokens": 11,
         "cache_creation_input_tokens": 3,
     }
+
+
+@pytest.mark.parametrize("system", [None, "", [], "Follow the supplied instructions."])
+async def test_system_message_uses_leading_developer_input(system: Any) -> None:
+    captured: list[Payload] = []
+
+    def send(request: httpx2.Request) -> httpx2.Response:
+        captured.append(json.loads(request.content))
+        return _stream(_completed(_text("Synthetic reply")))
+
+    async with (
+        httpx2.AsyncClient(transport=httpx2.MockTransport(send)) as upstream,
+        _client(upstream, Tokens()) as client,
+    ):
+        response = await client.post("/v1/messages", json=_request(system=system), headers=_AUTH)
+    assert response.status_code == 200
+    payload = captured[0]
+    assert "instructions" not in payload
+    if system:
+        assert payload["input"][0] == {
+            "type": "message",
+            "role": "developer",
+            "content": [{"type": "input_text", "text": system}],
+        }
+    assert payload["input"][-1] == {
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": "Hello"}],
+    }
+    assert len(payload["input"]) == (2 if system else 1)
+
+
+async def test_cache_session_identity_is_scoped_validated_and_not_forwarded_raw() -> None:
+    sessions: list[str | None] = []
+    requests: list[Payload] = []
+    original = "a1b2c3d4-1234-4123-8123-0123456789ab"
+    other = "a1b2c3d4-1234-4123-8123-0123456789ac"
+    header = "x-claude-code-session-id"
+
+    def send(request: httpx2.Request) -> httpx2.Response:
+        sessions.append(request.headers.get("session-id"))
+        requests.append(json.loads(request.content))
+        assert "x-claude-code-session-id" not in request.headers
+        return _stream(_completed(_text("Synthetic reply")))
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(send)) as upstream:
+        async with _client(upstream, Tokens()) as client:
+            for session in (original, original.upper(), other):
+                response = await client.post(
+                    "/v1/messages", json=_request(), headers={**_AUTH, header: session}
+                )
+                assert response.status_code == 200
+
+            for extra in (
+                [],
+                [(header, "")],
+                [(header, "a1b2c3d41234412381230123456789ab")],
+                [(header, original + ", " + other)],
+                [(header, original), (header, other)],
+                [("session-id", original)],
+            ):
+                response = await client.post(
+                    "/v1/messages",
+                    json=_request(metadata={"session_id": original}),
+                    headers=[("Authorization", _AUTH["Authorization"]), *extra],
+                )
+                assert response.status_code == 200
+
+        gateway = create_gateway(
+            {"claudex-opus": _ROUTE},
+            client=upstream,
+            token_provider=Tokens(),
+            gateway_token="another-synthetic-gateway-secret",
+        )
+        async with httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=gateway), base_url="http://local"
+        ) as client:
+            response = await client.post(
+                "/v1/messages",
+                json=_request(),
+                headers={
+                    "Authorization": "Bearer another-synthetic-gateway-secret",
+                    header: original,
+                },
+            )
+            assert response.status_code == 200
+
+    assert sessions[0] == sessions[1]
+    assert sessions[0] != sessions[2]
+    assert sessions[0] != sessions[-1]
+    assert sessions[0] != original
+    assert sessions[0] is not None and UUID(sessions[0]).version == 4
+    assert all(session is None for session in sessions[3:-1])
+    assert all("metadata" not in payload and "session-id" not in payload for payload in requests)
 
 
 async def test_stream_accepts_responses_sse_without_content_type() -> None:
@@ -354,8 +461,46 @@ async def test_responses_headerless_sse_must_still_contain_valid_events() -> Non
     assert "malformed streaming JSON" in events[-1]["error"]["message"]
 
 
+async def test_tool_order_is_stable_across_equivalent_requests() -> None:
+    captured: list[Payload] = []
+
+    def send(request: httpx2.Request) -> httpx2.Response:
+        captured.append(json.loads(request.content))
+        return _stream(_completed(_text("Synthetic reply")))
+
+    tools = [
+        {
+            "name": "zeta",
+            "description": "Look up zeta.",
+            "input_schema": {"type": "object", "properties": {"z": {}, "a": {}}},
+            "strict": True,
+        },
+        {"name": "alpha", "input_schema": {"type": "object", "properties": {}}},
+    ]
+    choice = {"type": "tool", "name": "zeta", "disable_parallel_tool_use": True}
+    async with (
+        httpx2.AsyncClient(transport=httpx2.MockTransport(send)) as upstream,
+        _client(upstream, Tokens()) as client,
+    ):
+        for definitions in (tools, list(reversed(tools))):
+            response = await client.post(
+                "/v1/messages", json=_request(tools=definitions, tool_choice=choice), headers=_AUTH
+            )
+            assert response.status_code == 200
+
+    assert captured[0]["tools"] == captured[1]["tools"]
+    ordered = captured[0]["tools"][0]["tools"]
+    assert [tool["name"] for tool in ordered] == ["alpha", "zeta"]
+    assert list(ordered[1]["parameters"]["properties"]) == ["z", "a"]
+    assert ordered[1]["strict"] is True
+    for payload in captured:
+        assert payload["tool_choice"] == {"type": "function", "name": "claude_code.zeta"}
+        assert payload["parallel_tool_calls"] is False
+
+
 async def test_tool_call_and_result_round_trip_with_structured_output() -> None:
     captured: list[Payload] = []
+    sessions: list[str | None] = []
     tool_call = {
         "type": "function_call",
         "namespace": "claude_code",
@@ -366,6 +511,7 @@ async def test_tool_call_and_result_round_trip_with_structured_output() -> None:
 
     def send(request: httpx2.Request) -> httpx2.Response:
         captured.append(json.loads(request.content))
+        sessions.append(request.headers.get("session-id"))
         return _stream(_completed(tool_call if len(captured) == 1 else _text('{"ok":true}')))
 
     tools = [{"name": "mcp__project__read", "input_schema": {"type": "object"}}]
@@ -380,7 +526,9 @@ async def test_tool_call_and_result_round_trip_with_structured_output() -> None:
         _client(upstream, Tokens()) as client,
     ):
         initial = _request(tools=tools, tool_choice={"type": "tool", "name": "mcp__project__read"})
-        response = await client.post("/v1/messages", json=initial, headers=_AUTH)
+        session = "f3e4a5b6-0111-4222-8333-444455556666"
+        headers = {**_AUTH, "x-claude-code-session-id": session}
+        response = await client.post("/v1/messages", json=initial, headers=headers)
         assert response.status_code == 200
         call = response.json()["content"][0]
         assert call == {
@@ -420,8 +568,10 @@ async def test_tool_call_and_result_round_trip_with_structured_output() -> None:
             tools=tools,
             output_config={"format": {"type": "json_schema", "schema": schema}},
         )
-        response = await client.post("/v1/messages", json=continued, headers=_AUTH)
+        response = await client.post("/v1/messages", json=continued, headers=headers)
     assert response.status_code == 200
+    assert sessions[0] == sessions[1] and sessions[0] != session
+    assert sessions[0] is not None and UUID(sessions[0]).version == 4
     assert response.json()["content"] == [{"type": "text", "text": '{"ok":true}'}]
     assert captured[0]["tool_choice"] == {
         "type": "function",
@@ -650,9 +800,11 @@ async def test_authentication_validation_and_context_rejection_use_messages_erro
 async def test_upstream_refreshes_once_and_releases_rate_limit_metadata() -> None:
     tokens = Tokens()
     credentials: list[str] = []
+    sessions: list[str | None] = []
 
     def send(request: httpx2.Request) -> httpx2.Response:
         credentials.append(request.headers["authorization"])
+        sessions.append(request.headers.get("session-id"))
         if len(credentials) == 1:
             return httpx2.Response(401, json={"error": {"message": "sensitive raw message"}})
         return httpx2.Response(
@@ -670,8 +822,13 @@ async def test_upstream_refreshes_once_and_releases_rate_limit_metadata() -> Non
         httpx2.AsyncClient(transport=httpx2.MockTransport(send)) as upstream,
         _client(upstream, tokens) as client,
     ):
-        response = await client.post("/v1/messages", json=_request(stream=True), headers=_AUTH)
+        response = await client.post(
+            "/v1/messages",
+            json=_request(stream=True),
+            headers={**_AUTH, "x-claude-code-session-id": "f3e4a5b6-0111-4222-8333-444455556666"},
+        )
     assert credentials == ["Bearer current", "Bearer replacement"]
+    assert sessions[0] is not None and sessions[0] == sessions[1]
     assert tokens.refreshes == [None, "current"]
     assert response.status_code == 429
     assert response.headers["retry-after"] == "123"

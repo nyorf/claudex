@@ -25,6 +25,13 @@ Claudex sends a streaming Responses request with storage disabled and keeps tran
 in memory. Claude Code stores transcripts, resumes sessions, and compacts conversations.
 Compaction requests use the same model route and profile as the rest of the session.
 
+Claudex sends Claude Code's system prompt as the first developer message so OpenAI can reuse
+it when the prompt prefix matches. Claudex sends tool definitions in name order so the prefix
+stays stable when Claude Code reorders the same tools. When Claude Code sends a valid session
+ID, Claudex derives a separate ID for OpenAI and reuses it across requests in that session.
+OpenAI uses it to route requests for cache reuse. Cache read and write counts appear in Claude
+Code's token usage. [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
+
 Sign in with ChatGPT opens the system browser and returns to an ephemeral loopback callback.
 Each profile uses its own OAuth registration and workspace grant. Claudex saves credentials in
 the operating system credential store. If several launches share a profile, only one can

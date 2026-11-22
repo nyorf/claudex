@@ -7,6 +7,7 @@ from collections.abc import Callable
 from contextlib import aclosing
 from secrets import compare_digest
 from typing import Annotated
+from uuid import UUID
 
 import anyio
 import httpx2
@@ -29,6 +30,9 @@ from claudex.services.inference import TranslatedInference
 _MAX_BODY_BYTES = 32 * 1024 * 1024
 _HEARTBEAT_SECONDS = 15
 _READINESS_CHALLENGE = re.compile(r"[a-f0-9]{64}\Z")
+_SESSION_ID = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z"
+)
 
 
 class _UnauthorizedError(Exception):
@@ -145,6 +149,7 @@ def create_gateway(
 
     @router.post("/v1/messages", response_model=None, dependencies=[Depends(authenticated)])
     async def messages(
+        request: Request,
         body: Annotated[MessagesRequest, Depends(_messages_body)],
     ) -> Response:
         try:
@@ -153,7 +158,13 @@ def create_gateway(
             )
         except InvalidMessagesRequestError as exc:
             return _error_json(gateway_error(exc))
-        return _InferenceResponse(upstream, inference)
+        session_ids = request.headers.getlist("x-claude-code-session-id")
+        session_id = None
+        if len(session_ids) == 1 and _SESSION_ID.fullmatch(session_ids[0]):
+            normalized = session_ids[0].lower().encode("ascii")
+            raw = hmac.digest(expected_token, b"claudex-cache-session-v1:" + normalized, "sha256")
+            session_id = str(UUID(bytes=raw[:16], version=4))
+        return _InferenceResponse(upstream, inference, session_id)
 
     app.include_router(router)
     return app
@@ -204,10 +215,13 @@ def _sse(payload: Payload) -> bytes:
 
 
 class _InferenceResponse(Response):
-    def __init__(self, upstream: ResponsesClient, inference: InferenceRequest) -> None:
+    def __init__(
+        self, upstream: ResponsesClient, inference: InferenceRequest, session_id: str | None
+    ) -> None:
         super().__init__()
         self._upstream = upstream
         self._inference = inference
+        self._session_id = session_id
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         async with anyio.create_task_group() as tasks:
@@ -225,7 +239,9 @@ class _InferenceResponse(Response):
 
     async def _respond(self, scope: Scope, receive: Receive, send: Send) -> None:
         try:
-            async with self._upstream.events(self._inference.payload) as events:
+            async with self._upstream.events(
+                self._inference.payload, session_id=self._session_id
+            ) as events:
                 translated = TranslatedInference(self._inference, events)
                 if self._inference.stream:
                     await _write_stream(translated, send)

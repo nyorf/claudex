@@ -25,28 +25,35 @@ class ResponsesClient:
         self._token_provider = token_provider
 
     @asynccontextmanager
-    async def events(self, payload: Payload) -> AsyncIterator[AsyncIterator[Payload]]:
+    async def events(
+        self, payload: Payload, *, session_id: str | None = None
+    ) -> AsyncIterator[AsyncIterator[Payload]]:
         token = await self._token_provider.access_token()
-        async with self._stream(payload, token) as response:
+        async with self._stream(payload, token, session_id) as response:
             if response.status_code != 401:
                 yield await _stream_events(response)
                 return
         # only a pre-stream credential failure is safe to retry
         token = await self._token_provider.access_token(refresh_if=token)
-        async with self._stream(payload, token) as response:
+        async with self._stream(payload, token, session_id) as response:
             yield await _stream_events(response)
 
     @asynccontextmanager
-    async def _stream(self, payload: Payload, token: str) -> AsyncIterator[httpx2.Response]:
+    async def _stream(
+        self, payload: Payload, token: str, session_id: str | None
+    ) -> AsyncIterator[httpx2.Response]:
         try:
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "text/event-stream",
+                "Accept-Encoding": "identity",
+            }
+            if session_id is not None:
+                headers["session-id"] = session_id
             request = self._client.build_request(
                 "POST",
                 _RESPONSES_URL,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "text/event-stream",
-                    "Accept-Encoding": "identity",
-                },
+                headers=headers,
                 json=payload,
             )
         except ValueError:
