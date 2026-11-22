@@ -189,12 +189,12 @@ running the launcher so the app can pick up the window.
 A regular Dock launch uses Desktop's window for gateway aliases. See
 [Desktop gateway context](https://claude.com/docs/third-party/claude-desktop/gateway#context-window-and-compaction).
 
-Direct setup supports local profiles on Claude Desktop (tested on build `5.11492.5`). Organization-managed
-settings take precedence. If your build requires manual import, run
-`claudex configure desktop --export`. Import the generated JSON via **Developer → Configure
-Third-Party Inference**, apply the changes, and relaunch Desktop. If the Developer menu is
-hidden, use **Help → Troubleshooting → Enable Developer Mode**. To switch back, apply your
-previous profile or choose Claude.ai sign-in. See the
+Direct setup checks the Claude Desktop installation and validates existing local profile metadata
+before applying changes. Organization-managed settings take precedence. To import the profile
+manually, run `claudex configure desktop --export`. Import the generated JSON via
+**Developer → Configure Third-Party Inference**, apply the changes, and relaunch Desktop. If
+the Developer menu is hidden, use **Help → Troubleshooting → Enable Developer Mode**. To
+switch back, apply your previous profile or choose Claude.ai sign-in. See the
 [Claude Desktop configuration guide](https://claude.com/docs/third-party/claude-desktop/in-app-configuration).
 
 If you import the profile manually, you can set `CLAUDE_CODE_MAX_CONTEXT_TOKENS` in a saved

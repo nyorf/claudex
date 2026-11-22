@@ -26,7 +26,6 @@ from claudex.infrastructure.gateway_settings import (
 
 _APP_ID = "com.anthropic.claudefordesktop"
 _APP_PATH = Path("/Applications/Claude.app")
-_SUPPORTED_BUILD = "5.11492.5"
 _PROFILE_ID = "998ff74b-3a8c-5d89-a510-fdb6e200b833"
 _PROFILE_NAMES = ("Claudex", "Claudex (managed)")
 _UUID = re.compile(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}")
@@ -423,13 +422,9 @@ def _desktop_running() -> bool:
 
 def _check_app(*, command: str = "claudex configure desktop") -> None:
     app = _app_metadata()
-    if (
-        not isinstance(app, dict)
-        or app.get("CFBundleIdentifier") != _APP_ID
-        or app.get("CFBundleVersion") != _SUPPORTED_BUILD
-    ):
+    if not isinstance(app, dict) or app.get("CFBundleIdentifier") != _APP_ID:
         raise GatewaySettingsError(
-            "This Claude Desktop build has not been verified for direct configuration. "
+            "Claudex could not identify Claude Desktop at /Applications/Claude.app. "
             "Use claudex configure desktop --export and import the profile in Claude Desktop."
         )
     if _desktop_running():

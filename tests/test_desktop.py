@@ -9,8 +9,9 @@ from typing import Any
 
 import pytest
 
+from claudex import cli
 from claudex.infrastructure import desktop
-from claudex.infrastructure.gateway_settings import GatewaySettingsError
+from claudex.infrastructure.gateway_settings import GatewaySettingsError, GatewaySnapshot
 
 _BEARER = "a" * 43
 _COMMAND = ("/path with 'quotes'/claudex", "-I", "-m", "claudex")
@@ -272,16 +273,46 @@ def test_desktop_pins_helper_to_the_canonical_state_directory(tmp_path: Path) ->
     assert str(state_dir.resolve()) in shlex.split(helper.read_text().splitlines()[1])
 
 
-def test_direct_configuration_requires_the_supported_app_to_be_closed(
+def test_direct_configuration_requires_the_app_to_be_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(desktop, "_desktop_running", lambda: True)
     with pytest.raises(GatewaySettingsError, match="Quit Claude Desktop"):
         _configure(tmp_path)
-    monkeypatch.setattr(desktop, "_app_metadata", lambda: {})
-    with pytest.raises(GatewaySettingsError, match="--export"):
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("metadata", [None, {}, {"CFBundleIdentifier": "example.other"}])
+def test_direct_configuration_rejects_an_unidentified_app(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata: object
+) -> None:
+    monkeypatch.setattr(desktop, "_app_metadata", lambda: metadata)
+    with pytest.raises(GatewaySettingsError, match="could not identify Claude Desktop.*--export"):
         _configure(tmp_path)
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("version", ["5.11492.5", "6.6395.1", "99.1.0"])
+def test_desktop_cli_configures_and_launches_installed_app_versions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str
+) -> None:
+    state_dir = tmp_path / "state"
+    settings = _gateway_settings()
+    snapshot = GatewaySnapshot(settings, "binding", None)
+    opened: list[int] = []
+    monkeypatch.setattr(
+        desktop,
+        "_app_metadata",
+        lambda: {"CFBundleIdentifier": desktop._APP_ID, "CFBundleVersion": version},
+    )
+    monkeypatch.setattr(cli, "_desktop_paths", lambda _: (tmp_path, state_dir))
+    monkeypatch.setattr(cli, "_acquire_proxy", lambda *_: snapshot)
+    monkeypatch.setattr(desktop, "_open_desktop", opened.append)
+    monkeypatch.setattr(sys, "argv", ["claudex", "desktop"])
+    assert cli.main() == 0
+    assert opened == [872_000]
+    meta = _json(_support(tmp_path) / "Claude-3p" / "configLibrary" / "_meta.json")
+    assert meta["appliedId"] == desktop._PROFILE_ID
 
 
 def test_export_skips_the_app_and_only_writes_private_state(
