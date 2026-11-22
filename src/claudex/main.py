@@ -25,6 +25,7 @@ from claudex.api.gateway import create_gateway
 from claudex.config.launch import Launch
 from claudex.domain.accounts import TokenProvider
 from claudex.infrastructure.gateway_settings import GatewayLaunch, GatewaySettingsStore
+from claudex.observability.logging import cache_log_file
 
 DEFAULT_PORT = 8765
 _LOOPBACK = "127.0.0.1"
@@ -326,7 +327,8 @@ async def serve_gateway(
         instance = (
             persistence.store.running_instance() if persistence is not None else nullcontext()
         )
-        with instance:
+        log_path = state_dir / "gateways" / "cache.jsonl" if state_dir is not None else None
+        with instance, cache_log_file(log_path):
             async with _local_gateway(client, provider, launch, port, persistence, stop) as gateway:
                 if stop.is_set():
                     return 0

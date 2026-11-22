@@ -103,6 +103,22 @@ If this port has saved launch options and they match the default profile, Claude
 Pass an explicit profile or route option to change them after stopping the proxy. Use
 `claudex serve --foreground --saved` to diagnose startup with the same launch options.
 
+The proxy writes one `inference_cache_usage` JSON line for each request with final cache counts
+from OpenAI. The event includes the model, request ID, cache hit or miss, and input token counts.
+The uncached total includes cache writes. Prompts, tool inputs, and tool results stay out of the
+log.
+
+The standalone proxy writes these events to `gateways/cache.jsonl` in the Claudex state directory,
+including when started by `claudex cli` or `claudex desktop`. The file rotates at 1 MiB and retains
+two older files. Foreground mode also shows the events on standard error. On macOS, this command
+follows the log.
+
+```sh
+tail -F "$HOME/Library/Application Support/claudex/gateways/cache.jsonl"
+```
+
+If you set `CLAUDEX_STATE_DIR`, use that directory in the path.
+
 After `serve` has started once, `claudex configure` applies its URL, local credential,
 context window, model picker, and effort defaults to your Claude user settings. It uses
 `~/.claude/settings.json` or the file under `CLAUDE_CONFIG_DIR`. The proxy accepts the same

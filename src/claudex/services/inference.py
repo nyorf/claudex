@@ -5,6 +5,7 @@ from contextlib import aclosing
 from claudex.domain.gateway import UpstreamProtocolError
 from claudex.domain.output import ResponseTranslation, apply_stop_sequences
 from claudex.domain.translation import InferenceRequest, Payload
+from claudex.observability.logging import log_cache_usage
 
 
 class TranslatedInference:
@@ -12,13 +13,26 @@ class TranslatedInference:
         self._translation = ResponseTranslation(request)
         self._upstream = upstream
         self._stop_sequences = request.stop_sequences
+        self._model: str = request.payload["model"]
 
     def message(self) -> Payload:
         return self._translation.message()
 
     async def events(self) -> AsyncGenerator[Payload]:
         async for upstream_event in self._upstream:
-            for event in self._translation.consume(upstream_event):
+            events = self._translation.consume(upstream_event)
+            if self._translation.cache_usage is not None:
+                usage = self._translation.cache_usage
+                log_cache_usage(
+                    request_id=self._translation.message_id,
+                    model=self._model,
+                    cached_input_tokens=usage["cache_read_input_tokens"],
+                    uncached_input_tokens=(
+                        usage["input_tokens"] + usage["cache_creation_input_tokens"]
+                    ),
+                    cache_write_input_tokens=usage["cache_creation_input_tokens"],
+                )
+            for event in events:
                 yield event
             if self._translation.complete:
                 return

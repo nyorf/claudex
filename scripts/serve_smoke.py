@@ -16,6 +16,7 @@ import httpx2
 from claudex.config.launch import Launch
 from claudex.domain.models import ModelRoute
 from claudex.main import LaunchError, serve_gateway
+from claudex.observability.logging import configure_logging
 
 _WINDOW = 475_000
 _ALIAS = "claudex-opus"
@@ -54,7 +55,14 @@ def _synthetic_response(request: httpx2.Request) -> httpx2.Response:
         "response": {
             "status": "completed",
             "output": [{"type": "message", "content": [{"type": "output_text", "text": marker}]}],
-            "usage": {"input_tokens": 1000, "output_tokens": 20},
+            "usage": {
+                "input_tokens": 1000,
+                "output_tokens": 20,
+                "input_tokens_details": {
+                    "cached_tokens": 700 if body["model"] == _UPSTREAM_MODEL else 0,
+                    "cache_write_tokens": 100,
+                },
+            },
         },
     }
     return httpx2.Response(
@@ -65,6 +73,7 @@ def _synthetic_response(request: httpx2.Request) -> httpx2.Response:
 
 
 async def _gateway(port: int, binding: str | None) -> int:
+    configure_logging()
     window = _WINDOW + int(os.environ.get("SYNTHETIC_CONTEXT_INCREMENT", "0"))
     route = ModelRoute(
         _UPSTREAM_MODEL,
@@ -357,6 +366,25 @@ async def _check_persistent(binary: str, env: dict[str, str], cwd: Path, port: i
         await _check_completion(binary, [], env, cwd)
     finally:
         await _stop_gateway(server)
+    log_path = Path(env["CLAUDEX_STATE_DIR"]) / "gateways" / "cache.jsonl"
+    entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    observations = [
+        (
+            entry["model"],
+            entry["cache_status"],
+            entry["cached_input_tokens"],
+            entry["uncached_input_tokens"],
+            entry["cache_write_input_tokens"],
+        )
+        for entry in entries
+        if entry.get("event") == "inference_cache_usage"
+    ]
+    if observations != [
+        (_UPSTREAM_MODEL, "hit", 700, 300, 100),
+        (_SMALL_MODEL, "miss", 0, 1000, 100),
+        (_UPSTREAM_MODEL, "hit", 700, 300, 100),
+    ]:
+        raise SmokeError("The standalone gateway did not persist cache usage across restart.")
     changed_env = {**env, "SYNTHETIC_CONTEXT_INCREMENT": "1000"}
     server = await _start_gateway(changed_env, cwd, port, binding=binding)
     try:

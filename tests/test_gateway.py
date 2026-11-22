@@ -9,6 +9,7 @@ import anyio
 import httpx2
 import pytest
 from starlette.types import Message
+from structlog.testing import capture_logs
 
 from claudex.api.gateway import create_gateway
 from claudex.config.launch import plan_launch
@@ -311,6 +312,113 @@ async def test_stream_maps_text_effort_image_and_usage() -> None:
         "cache_read_input_tokens": 11,
         "cache_creation_input_tokens": 3,
     }
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("cached", [0, 11])
+async def test_completed_request_logs_cache_counts_without_request_content(
+    stream: bool, cached: int
+) -> None:
+    private_prompt = "synthetic_private_prompt"
+    private_answer = "synthetic_private_answer"
+    private_metadata = "synthetic_private_metadata"
+    event = _completed(_text(private_answer))
+    event["response"]["usage"]["input_tokens_details"]["cached_tokens"] = cached
+
+    def send(_request: httpx2.Request) -> httpx2.Response:
+        return _stream(event)
+
+    with capture_logs() as logs:
+        async with (
+            httpx2.AsyncClient(transport=httpx2.MockTransport(send)) as upstream,
+            _client(upstream, Tokens()) as client,
+        ):
+            response = await client.post(
+                "/v1/messages",
+                json=_request(
+                    stream=stream,
+                    messages=[{"role": "user", "content": private_prompt}],
+                    metadata={"user_id": private_metadata},
+                ),
+                headers={
+                    **_AUTH,
+                    "x-claude-code-session-id": "f3e4a5b6-0111-4222-8333-444455556666",
+                },
+            )
+    assert response.status_code == 200
+    assert len(logs) == 1
+    log = logs[0]
+    assert set(log) == {
+        "event",
+        "log_level",
+        "request_id",
+        "model",
+        "cache_status",
+        "cached_input_tokens",
+        "uncached_input_tokens",
+        "cache_write_input_tokens",
+        "total_input_tokens",
+    }
+    assert log["event"] == "inference_cache_usage"
+    assert log["log_level"] == "info"
+    assert UUID(log["request_id"].removeprefix("msg_")).version == 4
+    assert log["model"] == "gpt-test"
+    assert log["cache_status"] == ("hit" if cached else "miss")
+    assert log["cached_input_tokens"] == cached
+    assert log["uncached_input_tokens"] == 61 - cached
+    assert log["cache_write_input_tokens"] == 3
+    assert log["total_input_tokens"] == 61
+    rendered = json.dumps(log)
+    for secret in (private_prompt, private_answer, private_metadata, _GATEWAY_TOKEN):
+        assert secret not in rendered
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_usable_incomplete_response_logs_cache_counts(stream: bool) -> None:
+    event = _completed(_text("partial"))
+    event["type"] = "response.incomplete"
+    event["response"].update(
+        status="incomplete", incomplete_details={"reason": "max_output_tokens"}
+    )
+
+    def send(_request: httpx2.Request) -> httpx2.Response:
+        return _stream(event)
+
+    with capture_logs() as logs:
+        async with (
+            httpx2.AsyncClient(transport=httpx2.MockTransport(send)) as upstream,
+            _client(upstream, Tokens()) as client,
+        ):
+            response = await client.post(
+                "/v1/messages", json=_request(stream=stream), headers=_AUTH
+            )
+    assert response.status_code == 200
+    assert len(logs) == 1
+    assert logs[0]["cached_input_tokens"] == 11
+    assert logs[0]["uncached_input_tokens"] == 50
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("failure", ["missing_cache_details", "premature", "invalid_usage"])
+async def test_no_cache_log_without_valid_provider_counts(stream: bool, failure: str) -> None:
+    event = _completed(_text("reply"))
+    if failure == "missing_cache_details":
+        event["response"]["usage"].pop("input_tokens_details")
+    elif failure == "premature":
+        event = {"type": "response.in_progress"}
+    else:
+        event["response"]["usage"]["input_tokens_details"]["cached_tokens"] = 1000
+
+    def send(_request: httpx2.Request) -> httpx2.Response:
+        return _stream(event)
+
+    with capture_logs() as logs:
+        async with (
+            httpx2.AsyncClient(transport=httpx2.MockTransport(send)) as upstream,
+            _client(upstream, Tokens()) as client,
+        ):
+            await client.post("/v1/messages", json=_request(stream=stream), headers=_AUTH)
+    assert logs == []
 
 
 @pytest.mark.parametrize("system", [None, "", [], "Follow the supplied instructions."])

@@ -23,6 +23,11 @@ class ResponseTranslation:
         self._blocks: dict[tuple[int, int], _Block] = {}
         self._calls: set[str] = set()
         self.complete = False
+        self.cache_usage: Payload | None = None
+
+    @property
+    def message_id(self) -> str:
+        return self._message_id
 
     def message(self) -> Payload:
         return {
@@ -160,13 +165,17 @@ class ResponseTranslation:
                 "OpenAI ended its response before a content block finished."
             )
         stop_reason = _stop_reason(response, self._blocks)
+        usage = _usage(response.get("usage"))
+        details = _object(response["usage"].get("input_tokens_details") or {})
+        if "cached_tokens" in details:
+            self.cache_usage = usage
         self.complete = True
         events.extend(
             [
                 {
                     "type": "message_delta",
                     "delta": {"stop_reason": stop_reason, "stop_sequence": None},
-                    "usage": _usage(response.get("usage")),
+                    "usage": usage,
                 },
                 {"type": "message_stop"},
             ]
