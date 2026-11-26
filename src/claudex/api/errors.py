@@ -56,7 +56,8 @@ def _upstream_error(exc: UpstreamRejectedError) -> ErrorResponse:
             return ErrorResponse(
                 429,
                 "rate_limit_error",
-                "ChatGPT plan usage reached a limit. See https://chatgpt.com/settings/usage",
+                "OpenAI reported a ChatGPT Subscription Sharing usage limit. "
+                "See https://chatgpt.com/settings/usage",
                 exc.retry_after,
                 False,
             )

@@ -55,7 +55,7 @@ class ResponseTranslation:
             case "response.failed":
                 raise _failed(_object(event.get("response")).get("error"))
             case "error":
-                raise _failed(event)
+                raise _failed(event.get("error", event))
             case _:
                 return []
 

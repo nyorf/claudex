@@ -944,6 +944,45 @@ async def test_upstream_refreshes_once_and_releases_rate_limit_metadata() -> Non
     assert "sensitive" not in response.text
 
 
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("shape", ["nested", "flat", "response_failed"])
+async def test_upstream_streamed_sharing_limit_uses_rate_limit_error(
+    stream: bool, shape: str
+) -> None:
+    error = {
+        "code": "subscription_sharing_usage_limit_exceeded",
+        "message": "sensitive upstream message",
+    }
+    if shape == "nested":
+        event = {"type": "error", "error": error}
+    elif shape == "flat":
+        event = {"type": "error", **error}
+    else:
+        event = {"type": "response.failed", "response": {"error": error}}
+
+    def send(_request: httpx2.Request) -> httpx2.Response:
+        return _stream(event)
+
+    async with (
+        httpx2.AsyncClient(transport=httpx2.MockTransport(send)) as upstream,
+        _client(upstream, Tokens()) as client,
+    ):
+        response = await client.post("/v1/messages", json=_request(stream=stream), headers=_AUTH)
+
+    if stream:
+        assert response.status_code == 200
+        events = _sse_payloads(response)
+        assert [item["type"] for item in events] == ["message_start", "error"]
+        result = events[-1]["error"]
+    else:
+        assert response.status_code == 429
+        assert response.headers["x-should-retry"] == "false"
+        result = response.json()["error"]
+    assert result["type"] == "rate_limit_error"
+    assert "https://chatgpt.com/settings/usage" in result["message"]
+    assert "sensitive upstream message" not in response.text
+
+
 async def test_premature_stream_exit_sends_error_without_success_stop() -> None:
     def send(_request: httpx2.Request) -> httpx2.Response:
         return _stream({"type": "response.in_progress"})
