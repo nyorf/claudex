@@ -1,6 +1,6 @@
 [project]
 name = "claudex"
-version = "1.0.11"
+version = "1.0.12"
 description = "Run Claude Code with inference from your ChatGPT plan"
 readme = "README.md"
 license = "Apache-2.0"
